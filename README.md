@@ -21,6 +21,6 @@ VertiFuse is a Python toolkit designed to fuse GNSS data with OPERA-DISP product
 ## Installation
 
 ```bash
-git clone https://github.com/yourusername/VertiFuse.git
+git clone https://github.com/opera-adt/VertiFuse.git
 cd VertiFuse
 pip install -r requirements.txt
