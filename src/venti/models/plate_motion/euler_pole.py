@@ -13,10 +13,11 @@ from typing import Tuple, Dict, Optional, Union
 
 
 # Constants
-EARTH_RADIUS_KM = 6371.0
+EARTH_RADIUS_KM = 6371.0 
 DEG_TO_RAD = np.pi / 180.0
 RAD_TO_DEG = 180.0 / np.pi
 MYR_TO_YEAR = 1e6
+MAS_TO_RAD = np.pi / 648000000
 
 
 # Initialize coordinate transformer (WGS84 to geocentric cartesian)
@@ -71,15 +72,14 @@ def get_local_frame(longitude: float, latitude: float, height: float = 0.0) -> n
     # Get conversion matrix XYZ to ENU
     R = get_conversion_matrix(longitude, latitude)
     
-    # Observation equation matrix in local frame
+    # Observation equation matrix (skew-symmetric for cross product)
+    # ω × r = [ωy*z - ωz*y, ωz*x - ωx*z, ωx*y - ωy*x]
     Ai = np.array([
         [0, z, -y],
         [-z, 0, x],
         [y, -x, 0]
     ], dtype=np.float64)
     
-    # Convert to km scale (m → km)
-    Ai = Ai / 1000.0
     
     # Apply rotation matrix
     RAi = np.dot(R, Ai)
@@ -177,9 +177,8 @@ def calculate_euler_pole(longitude: np.ndarray, latitude: np.ndarray,
         # Get local frame matrix
         local_frame = get_local_frame(lon, lat, hgt)
         
-        # Cross-correlation term (simplified assumption: correlation = σe × σn × √(σe² + σn²))
-        # Units: (mm/year)² to match covariance matrix diagonal terms
-        # Note: use estimated cross-corelation coeff
+        # Correlation coefficient should be dimensionless between -1 and 1
+        # Covariance = σe × σn × correlation_coefficient
         cross_correlation = se * sn * correlation_coefficient
         
         # Fill design matrix
@@ -237,9 +236,9 @@ def calculate_euler_pole(longitude: np.ndarray, latitude: np.ndarray,
     
     # Extract rotation components
     # mm/year per km × (1 m/1000 mm) × (1 km/1000 m) = 1e-6 × (unitless) = rad/year
-    wx = X[0, 0] * 1e-6 # rad/year
-    wy = X[1, 0] * 1e-6 # rad/year
-    wz = X[2, 0] * 1e-6 # rad/year
+    wx = X[0, 0]  / 1000 # rad/year
+    wy = X[1, 0] / 1000 # rad/year
+    wz = X[2, 0] / 1000 # rad/year
     
     # Convert to Euler pole
     euler_longitude, euler_latitude, omega = rotation_rate_to_euler_pole(wx, wy, wz)
@@ -265,7 +264,8 @@ def calculate_euler_pole(longitude: np.ndarray, latitude: np.ndarray,
         'chi_squared': chi2,
         'reduced_chi_squared': reduced_chi2,
         'degrees_of_freedom': dof,
-        'parameter_covariance': Q * 1e-12  # (mm/year per km)² to (rad/year)²
+        'parameter_covariance': Q / (1000.0**2),  # (mm/year per km)² to (rad/year)²
+        'rotation_rates_rad_per_year': [wx, wy, wz]
     }
     
     return euler_longitude, euler_latitude, omega, statistics
