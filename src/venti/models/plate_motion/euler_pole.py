@@ -4,13 +4,7 @@ Euler Pole Calculation for Tectonic Plate Motion Analysis
 This module provides functions to calculate Euler poles from GPS velocity data,
 handling coordinate transformations and uncertainty estimation.
 
-UNIT CONVENTIONS:
-- Input coordinates: degrees (longitude, latitude), meters (height)
-- Input velocities: mm/year (velocity_east, velocity_north, uncertainties)
-- Output Euler pole: degrees (longitude, latitude), deg/Myr (angular velocity)
-- Internal rotation rates: rad/year (wx, wy, wz)
-- Spatial scaling: coordinates converted from meters to kilometers
-- Time scaling: 1 Myr = 1e6 years
+NOTE: refactor to class Culer
 """
 
 import numpy as np
@@ -147,7 +141,8 @@ def euler_pole_to_rotation_rate(euler_longitude: float, euler_latitude: float,
 def calculate_euler_pole(longitude: np.ndarray, latitude: np.ndarray,
                         velocity_east: np.ndarray, velocity_north: np.ndarray,
                         sigma_east: np.ndarray, sigma_north: np.ndarray,
-                        heights: Optional[np.ndarray] = None) -> Tuple[float, float, float, Dict]:
+                        heights: Optional[np.ndarray] = None,
+                        correlation_coefficient: Optional[float] = 0) -> Tuple[float, float, float, Dict]:
     """
     Calculate Euler pole from GPS velocity data using weighted least squares.
     
@@ -171,8 +166,8 @@ def calculate_euler_pole(longitude: np.ndarray, latitude: np.ndarray,
     
     # Initialize design matrix and observation vector
     A = np.zeros((2 * n_sites, 3), dtype=np.float64)
-    b = np.zeros((2 * n_sites, 1), dtype=np.float64)
-    covariance_matrix = np.zeros((2 * n_sites, 2 * n_sites), dtype=np.float64)
+    b = np.zeros((2 * n_sites, 1), dtype=np.float64)  
+    cov = np.zeros((2 * n_sites, 2 * n_sites), dtype=np.float64)
     
     # Build system matrices
     for i, (lon, lat, hgt, ve, vn, se, sn) in enumerate(
@@ -182,10 +177,10 @@ def calculate_euler_pole(longitude: np.ndarray, latitude: np.ndarray,
         # Get local frame matrix
         local_frame = get_local_frame(lon, lat, hgt)
         
-        # Cross-correlation term 
-        # simplified assumption: correlation = σe × σn × √(σe² + σn²)
+        # Cross-correlation term (simplified assumption: correlation = σe × σn × √(σe² + σn²))
         # Units: (mm/year)² to match covariance matrix diagonal terms
-        cross_correlation = se * sn * np.sqrt(se**2 + sn**2)
+        # Note: use estimated cross-corelation coeff
+        cross_correlation = se * sn * correlation_coefficient
         
         # Fill design matrix
         A[2*i, :] = local_frame[0, :]      # East component
@@ -196,59 +191,81 @@ def calculate_euler_pole(longitude: np.ndarray, latitude: np.ndarray,
         b[2*i + 1, 0] = vn
         
         # Fill covariance matrix
-        covariance_matrix[2*i, 2*i] = se**2
-        covariance_matrix[2*i + 1, 2*i + 1] = sn**2
-        covariance_matrix[2*i + 1, 2*i] = cross_correlation
-        covariance_matrix[2*i, 2*i + 1] = cross_correlation
+        cov[2*i, 2*i] = se**2
+        cov[2*i + 1, 2*i + 1] = sn**2
+        cov[2*i + 1, 2*i] = cross_correlation
+        cov[2*i, 2*i + 1] = cross_correlation
+
     
     # Weighted least squares solution
-    weight_matrix = np.linalg.inv(covariance_matrix)
-    ATP = A.T @ weight_matrix
+    eigenvals = np.linalg.eigvals(cov)
+    if np.any(eigenvals <= 0):
+        raise ValueError("Covariance matrix is not positive definite")
+
+    # Solve linear system
     
-    normal_matrix = ATP @ A
-    right_hand_side = ATP @ b
+    try:
+        P = np.linalg.inv(cov)
+    except np.linalg.LinAlgError:
+        raise ValueError("Covariance matrix is singular.") 
+
+    ATP = A.T @ P
+    
+    N = ATP @ A
+    M = ATP @ b
     
     # Solve for rotation parameters
-    parameter_covariance = np.linalg.inv(normal_matrix)
-    solution = parameter_covariance @ right_hand_side
+    try:
+        Q = np.linalg.inv(N)
+    except np.linalg.LinAlgError:
+        raise ValueError("Normal matrix is singular.")
+
+    X = np.dot(Q, M)
     
     # Calculate model predictions and residuals
-    model_prediction = A @ solution
-    residuals = b - model_prediction
+    MP = np.dot(A, X)
+    residuals = b - MP
     
     # Statistical analysis
-    chi_squared = float(residuals.T @ weight_matrix @ residuals)
-    degrees_of_freedom = 2 * n_sites - 3
-    reduced_chi_squared = np.sqrt(chi_squared / degrees_of_freedom)
+    chi2 = float(residuals.T @ P @ residuals)
+    # Deegres of freedom
+    dof = 2 * n_sites - 3
+    if dof <= 0:
+        raise ValueError(f"Insufficient degrees of freedom: {dof}. Need at least 3 sites.")
+
+    reduced_chi2= np.sqrt(chi2 / dof)
     
     # Extract rotation components
     # mm/year per km × (1 m/1000 mm) × (1 km/1000 m) = 1e-6 × (unitless) = rad/year
-    wx = solution[0, 0] * 1e-6 # rad/year
-    wy = solution[1, 0] * 1e-6 # rad/year
-    wz = solution[2, 0] * 1e-6 # rad/year
+    wx = X[0, 0] * 1e-6 # rad/year
+    wy = X[1, 0] * 1e-6 # rad/year
+    wz = X[2, 0] * 1e-6 # rad/year
     
     # Convert to Euler pole
     euler_longitude, euler_latitude, omega = rotation_rate_to_euler_pole(wx, wy, wz)
     
     # Calculate RMS statistics
-    residuals_east = residuals[::2].flatten()
-    residuals_north = residuals[1::2].flatten()
+    re = residuals[::2].flatten() # residuals east
+    rn = residuals[1::2].flatten() # residuals north
     
-    rms = np.sqrt(np.mean(residuals_east**2 + residuals_north**2))
+    rms = np.sqrt(np.mean(re**2 + rn**2))
     
     # Weighted RMS
-    weighted_residuals_squared = (residuals_east / sigma_east)**2 + (residuals_north / sigma_north)**2
-    weight_sum = np.sum(1/sigma_east**2 + 1/sigma_north**2)
-    wrms = np.sqrt(np.sum(weighted_residuals_squared) / weight_sum)
+    try:
+        wrms = np.sum((re / sigma_east)**2 + (rn / sigma_north)**2)
+        wrms /= np.sum(1/sigma_east**2 + 1/sigma_north**2)
+        wrms = np.sqrt(wrms)
+    except ZeroDivisionError:
+        wrms = np.nan
     
     # Compile statistics
     statistics = {
         'rms': rms,
         'wrms': wrms,
-        'chi_squared': chi_squared,
-        'reduced_chi_squared': reduced_chi_squared,
-        'degrees_of_freedom': degrees_of_freedom,
-        'parameter_covariance': parameter_covariance * 1e-12  # (mm/year per km)² to (rad/year)²
+        'chi_squared': chi2,
+        'reduced_chi_squared': reduced_chi2,
+        'degrees_of_freedom': dof,
+        'parameter_covariance': Q * 1e-12  # (mm/year per km)² to (rad/year)²
     }
     
     return euler_longitude, euler_latitude, omega, statistics
@@ -308,7 +325,8 @@ def model_plate_velocities(longitude: Union[float, np.ndarray],
                           latitude: Union[float, np.ndarray],
                           wx: float, wy: float, wz: float,
                           heights: Optional[Union[float, np.ndarray]] = None,
-                          rotation_covariance: Optional[np.ndarray] = None) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
+                          rotation_covariance: Optional[np.ndarray] = None
+                          ) -> Union[np.ndarray, Tuple[np.ndarray, np.ndarray]]:
     """
     Model plate motion velocities at given locations using rotation rate components.
     

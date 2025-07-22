@@ -25,7 +25,9 @@ from .euler_pole import (
 
 # Import ITRF data loading utilities
 from .load_itrf import (
-    load_itrf14_json,
+    ITRF14_DATA,
+    ITRF20_DATA,
+    load_itrf_json,
     json_to_dataframe,
     convert_to_euler_poles,
     get_plate_data)
@@ -46,7 +48,7 @@ __all__ = [
     
     
     # ITRF data loading functions
-    'load_itrf14_json',
+    'load_itrf_json',
     'json_to_dataframe',
     'convert_to_euler_poles',
     'get_plate_data',
@@ -55,5 +57,7 @@ __all__ = [
     'EARTH_RADIUS_KM',
     'DEG_TO_RAD', 
     'RAD_TO_DEG',
-    'MYR_TO_YEAR'
+    'MYR_TO_YEAR',
+    'ITRF14_DATA',
+    'ITRF20_DATA'
 ]

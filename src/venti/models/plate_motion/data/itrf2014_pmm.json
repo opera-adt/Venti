@@ -1,7 +1,7 @@
 {
     "metadata": {
       "title": "ITRF2014-PMM rotation pole cartesian components",
-      "reference": "Table S1",
+      "reference": "Altamimi et al 2017: https://doi.org/10.1093/gji/ggx136",
       "units": {
         "omega_x": "deg/Myr",
         "omega_y": "deg/Myr", 

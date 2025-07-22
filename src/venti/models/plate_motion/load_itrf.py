@@ -7,25 +7,42 @@ import os
 
 # Get the directory where this module is located
 MODULE_DIR = Path(__file__).parent
+ITRF14_DATA = MODULE_DIR / "data/itrf2014_sites.csv"
+ITRF20_DATA = MODULE_DIR / "data/itrf2020_sites.csv"  
 
-def load_itrf14_json(filepath: Optional[Union[str, Path]] = None) -> Dict:
+def load_itrf_json(filepath: Optional[Union[str, Path]] = None, 
+                   date: int = 2020) -> Dict:
     """
-    Load ITRF2024 data from JSON format.
-    https://academic.oup.com/gji/article/209/3/1906/3095992#supplementary-data
+    Load ITRF data from JSON format.
     
     Args:
-        filepath: Path to JSON file. If None, uses default itrf2024.json
+        filepath: Path to JSON file. If None, uses default itrf{date}.json
+        date: ITRF reference frame year (e.g., 2014, 2020)
         
     Returns:
         Dictionary with metadata and plates data
+        
+    Raises:
+        FileNotFoundError: If the specified file doesn't exist
+        ValueError: If the JSON file is invalid or malformed
     """
     if filepath is None:
-        filepath = MODULE_DIR / "data/itrf2014.json"
+        filepath = MODULE_DIR / f"data/itrf{date}_pmm.json"
     
-    with open(filepath, 'r') as f:
-        data = json.load(f)
-    
-    return data
+    try:
+        with open(filepath, 'r') as f:
+            data = json.load(f)
+        
+        # Basic validation
+        if 'metadata' not in data or 'plates' not in data:
+            raise ValueError(f"Invalid ITRF JSON format in {filepath}")
+            
+        return data
+        
+    except FileNotFoundError:
+        raise FileNotFoundError(f"ITRF data file not found: {filepath}")
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON in {filepath}: {e}")
 
 def json_to_dataframe(json_data: Dict) -> pd.DataFrame:
     """
