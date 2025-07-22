@@ -1,0 +1,183 @@
+[build-system]
+requires = ["setuptools>=64.0", "setuptools_scm[toml]>=6.2"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "venti"
+authors = [
+  { name = "Marin Govorcin", email = "marin.govorcin@jpl.nasa.gov" },
+  { name = "Scott Staniewicz", email = "scott.j.staniewicz@jpl.nasa.gov" },
+  { name = "Sara Mirzaee", email = "sara.mirzaee@jpl.nasa.gov" }
+]
+description = "Calibrated OPERA DISP with GNSS and project to vertical direction"
+readme = { file = "README.md", content-type = "text/markdown" }
+requires-python = ">=3.11"
+
+classifiers = [
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python",
+  "Topic :: Scientific/Engineering",
+  "Typing :: Typed",
+]
+license = { file = "LICENSE.txt" }
+
+# The version will be written into a version.py upon install, auto-generated
+# see section: setuptools_scm
+# https://setuptools.pypa.io/en/latest/userguide/pyproject_config.html#dynamic-metadata
+# dependencies will be read from text files
+dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://github.com/opera-adt/Venti"
+"Bug Tracker" = "https://github.com/opera-adt/Venti/issues"
+Discussions = "https://github.com/opera-adt/Venti/discussions"
+Changelog = "https://github.com/opera-adt/Venti/releases"
+
+# Entry points for the command line interface
+[project.scripts]
+venti = "venti.cli:cli"
+
+
+[tool.pixi.project]
+channels = ["conda-forge"]
+platforms = ["osx-arm64", "linux-64"]
+
+[tool.pixi.pypi-dependencies]
+venti = { path = ".", editable = true }
+
+[tool.pixi.dependencies]
+python = ">=3.11"
+pip = ">=21.3"
+git = "*"
+tyro = ">=0.9.24,<0.10"
+
+[tool.pixi.tasks]
+check = "pre-commit run -a"
+test = "pytest"
+docs = "mkdocs serve"
+clean = "rm -rf build/ dist/ *.egg-info/ .pytest_cache/ .coverage .ruff_cache/ src/venti/_version.py && find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true"
+
+
+# pixi install -e test
+[tool.pixi.feature.test.dependencies]
+pre-commit = "*"
+pytest = "*"
+pytest-cov = "*"
+pytest-randomly = "*"
+pytest-recording = ">=0.13.2"
+pytest-xdist = "*"
+ruff = "*"
+matplotlib = ">=3.10.3"
+ipython = ">=9.3.0"
+lxml = "*"
+ipdb = "*"
+contextily = "*"
+
+[tool.pixi.feature.docs.dependencies]
+mkdocs = "*"
+mkdocs-gen-files = "*"
+mkdocs-jupyter = "*"
+mkdocs-literate-nav = "*"
+mkdocs-material = "*"
+pymdown-extensions = "*"
+matplotlib = ">=3.10.3"
+ipython = ">=9.3.0"
+lxml = "*"
+contextily = ">=1.6.2,<2"
+
+# pixi install -e docs
+[tool.pixi.feature.docs.pypi-dependencies]
+mkdocstrings = { extras = ["python"] }
+mkdocs-section-index = "*"
+
+
+[tool.pixi.environments]
+test = ["test"]
+docs = ["docs"]
+
+
+[tool.setuptools_scm]
+# https://github.com/pypa/setuptools_scm#configuration-parameters
+write_to = "src/venti/_version.py"
+# https://github.com/pypa/setuptools_scm#version-number-construction
+version_scheme = "no-guess-dev" # Will not guess the next version
+
+[tool.ruff]
+src = ["src"]
+unsafe-fixes = true
+
+[tool.ruff.lint]
+select = [
+  "A",      # flake8-builtins
+  "ARG",    # flake8-unused-arguments
+  "B",      # flake8-bugbear
+  "C4",     # flake8-comprehensions
+  "D",      # pydocstyle
+  "E",      # pycodestyle (errors)
+  "W",      # pycodestyle (warnings)
+  "EM",     # flake8-errmsg
+  "EXE",    # flake8-executable
+  "F",      # Pyflakes
+  "I",      # isort
+  "ISC",    # flake8-implicit-str-concat
+  "N",      # pep8-naming
+  "NPY201", # numpy 2.0 depgrcations
+  "PGH",    # pygrep-hooks
+  "PIE",    # flake8-pie
+  "PL",     # Pylint
+  "PT",     # flake8-pytest-style
+  "PTH",    # flake8-use-pathlib
+  "PYI",    # flake8-pyi
+  "RUF",    # Ruff-specific rules
+  "SIM",    # flake8-simplify
+  "TRY",    # tryceratops
+  "UP",     # pyupgrade  <- not working with Pydantic lower python versions
+  "YTT",    # flake8-2020
+]
+
+ignore = [
+  "PTH123", # `open()` should be replaced by `Path.open()`
+  "PLR",    # Pylint Refactor
+  "D100",   # Missing docstring in public module
+  "D104",   # Missing docstring in public package
+  "D105",   # Missing docstring in magic method
+  "D102",   # D102: Missing docstring in public method (TODO: remove this ignore)
+  "D213",   # D213: Multi-line docstring summary should start at the second line
+  "D203",   # 1 blank line required before class docstring
+  "N806",   # Variable _ in function should be lowercase
+  "SIM108", # Use ternary operator
+]
+
+[tool.ruff.lint.per-file-ignores]
+"**/__init__.py" = ["F401", "F403"]
+"tests/**" = ["D", "N", "PTH", "ARG001", "PLR2004", "E501"]
+"scripts/*" = ["F401"]
+"src/venti/uncertainty.py" = ["RUF002"]                   # let us use sigma here
+"src/venti/schemas.py" = ["D106"]
+
+[tool.black]
+target-version = ["py311", "py312", "py313"]
+preview = true
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+plugins = ["pandera.mypy"]
+
+
+[tool.pytest.ini_options]
+doctest_optionflags = "NORMALIZE_WHITESPACE NUMBER"
+addopts = "  --cov=venti  --doctest-modules --randomly-seed=1234 --ignore=scripts --ignore=docs --ignore=data"
+filterwarnings = [
+  "error",
+  # https://github.com/dateutil/dateutil/pull/1285 will be released, but not yet
+  "ignore:datetime.datetime.utcfromtimestamp.*:DeprecationWarning",
+  "ignore:.*shapely.geos.*:DeprecationWarning",
+  # Ignore deprecation warnings from gps module during testing of deprecated functionality
+  "ignore:The 'geepers.gps' module is deprecated.*:DeprecationWarning",
+]
