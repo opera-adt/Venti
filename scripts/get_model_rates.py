@@ -12,7 +12,6 @@ Example usage:
     python get_model_rates.py 5678 --output /path/to/output --plate PCFC
 """
 
-import sys
 from collections import namedtuple
 from pathlib import Path
 from typing import Any, Dict, Literal, Tuple
@@ -25,6 +24,8 @@ from tyro import conf
 from pyproj import Transformer
 from rasterio.transform import Affine, from_bounds
 from rasterio.warp import Resampling, reproject
+
+import opera_utils
 
 import venti
 from venti.log import get_logger
@@ -345,8 +346,6 @@ def main(
         ValueError: If frame_id is not found in the database, or if invalid
             parameters are provided.
     """
-    # DISP frame database path
-    data_path = Path(venti.__path__[0]).parents[1]
 
     # Set output directory
     output_dir = Path(output)
@@ -356,20 +355,14 @@ def main(
     output_name = (output_dir /
                    f"frame_{frame_id}_{plate}_ITRF{itrf}_GIA_{gia}_rates.tif")
 
-    # Check for required data files
-    frame_file = data_path / "data/opera_disp_frame.geojson"
-    if not frame_file.exists():
-        raise FileNotFoundError(f"DISP frame database not found: "
-                                f"{frame_file}")
-
-    # Load DISP frame database
-    logger.info(f"Loading DISP frame database from {frame_file}")
-    disp_frame_db = gpd.read_file(frame_file)
+    # Get frame_df with opera_utils
+    logger.info(f"Loading DISP frame database")
+    disp_frame_db = opera_utils.get_frame_geodataframe()
 
     # Select requested frame
-    selected_frame = disp_frame_db[disp_frame_db['fid'] == frame_id]
+    selected_frame = disp_frame_db[disp_frame_db.index == frame_id]
     if selected_frame.empty:
-        available_fids = disp_frame_db['fid'].unique()
+        available_fids = disp_frame_db.index.unique()
         raise ValueError(f"Frame ID {frame_id} not found. "
                          f"Available IDs: {available_fids}")
     logger.info(f"Selected frame {frame_id}")
