@@ -12,9 +12,9 @@ Venti is a Python toolkit designed to fuse GNSS data with OPERA-DISP product to 
 
 ## Features
 
-- GNSS calibration of InSAR products  
+- GNSS calibration of InSAR products
 - Projection from line-of-sight (LOS) to vertical displacement
-- Line-of-sight (LOS) Decomposition  
+- Line-of-sight (LOS) Decomposition
 
 ---
 
