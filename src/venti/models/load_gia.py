@@ -59,9 +59,12 @@ def download_ice6g_data(url=ICE6D_URL, local_filename="ice6g_data.nc"):
 
     """
     # Check if file already exists
-    if Path.exists(local_filename):
+    local_path = Path(local_filename)
+
+    # Check if file already exists
+    if local_path.exists():
         print(f"File {local_filename} already exists, loading...")
-        return local_filename
+        return local_path
 
     # Download the file
     print(f"Downloading from {url}...")
