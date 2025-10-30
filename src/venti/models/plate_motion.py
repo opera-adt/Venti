@@ -18,12 +18,19 @@ MYR_TO_YEAR = 1e6
 MAS_TO_RAD = np.pi / 648000000
 
 
-# Initialize coordinate transformer (WGS84 to geocentric cartesian)
-LONLAT_TO_XYZ_TRANSFORMER = Transformer.from_crs(
-    "EPSG:4326",
-    {"proj": 'geocent', "ellps": 'GRS80', "datum": 'WGS84'},
-    always_xy=True,
-)
+# Lazy initialization of coordinate transformer to avoid import-time errors
+_LONLAT_TO_XYZ_TRANSFORMER = None
+
+def _get_transformer():
+    """Get or create the coordinate transformer (WGS84 to geocentric cartesian)."""
+    global _LONLAT_TO_XYZ_TRANSFORMER
+    if _LONLAT_TO_XYZ_TRANSFORMER is None:
+        _LONLAT_TO_XYZ_TRANSFORMER = Transformer.from_crs(
+            "EPSG:4326",
+            {"proj": 'geocent', "ellps": 'GRS80', "datum": 'WGS84'},
+            always_xy=True,
+        )
+    return _LONLAT_TO_XYZ_TRANSFORMER
 
 def get_conversion_matrix(longitude: float, latitude: float) -> np.ndarray:
     """
@@ -63,7 +70,7 @@ def get_local_frame(longitude: float, latitude: float, height: float = 0.0) -> n
         3x3 local frame matrix RAi
     """
     # Convert to geocentric cartesian coordinates
-    x, y, z = LONLAT_TO_XYZ_TRANSFORMER.transform(
+    x, y, z = _get_transformer().transform(
         longitude, latitude, height, radians=False
     )
 

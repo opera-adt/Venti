@@ -172,7 +172,7 @@ plugins = ["pandera.mypy"]
 
 [tool.pytest.ini_options]
 doctest_optionflags = "NORMALIZE_WHITESPACE NUMBER"
-addopts = "  --cov=venti  --doctest-modules --randomly-seed=1234 --ignore=scripts --ignore=docs --ignore=data"
+addopts = "  --cov=venti  --doctest-modules --randomly-seed=1234 --ignore=scripts --ignore=docs --ignore=data --ignore=src/venti/models"
 filterwarnings = [
   "error",
   # https://github.com/dateutil/dateutil/pull/1285 will be released, but not yet
@@ -180,4 +180,9 @@ filterwarnings = [
   "ignore:.*shapely.geos.*:DeprecationWarning",
   # Ignore deprecation warnings from gps module during testing of deprecated functionality
   "ignore:The 'geepers.gps' module is deprecated.*:DeprecationWarning",
+  # Ignore numpy binary incompatibility warnings from netCDF4/xarray
+  "ignore:numpy.ndarray size changed.*:RuntimeWarning",
+  "ignore:numpy.ufunc size changed.*:RuntimeWarning",
+  # Ignore pyproj database path warnings
+  "ignore:pyproj unable to set PROJ database path.*:UserWarning",
 ]
