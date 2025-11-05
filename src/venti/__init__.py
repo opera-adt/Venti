@@ -1,12 +1,17 @@
 """Venti package for calibrating OPERA DISP with GNSS."""
 
-import sys
 from typing import Any
 
 # Lazy imports to avoid pyproj initialization errors
 _LAZY_MODULES = {
     'models': '.models',
     'unwrap': '.unwrap',
+    'workflow': '.workflow',
+    'gnss': '.gnss',
+    'io': '.io',
+    'interpolation': '.interpolation',
+    'raster': '.raster',
+    'spatial': '.spatial',
 }
 
 
@@ -35,4 +40,4 @@ def __dir__():
     return list(_LAZY_MODULES.keys()) + ['__version__']
 
 
-__all__ = ['models', 'unwrap', '__version__']
+__all__ = ['__version__', 'models', 'unwrap', 'workflow', 'io'] #, 'gnss', 'interpolation', 'raster', 'spatial']

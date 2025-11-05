@@ -40,7 +40,7 @@ Changelog = "https://github.com/opera-adt/Venti/releases"
 
 # Entry points for the command line interface
 [project.scripts]
-venti = "venti.cli:cli"
+venti = "venti.__main__:main"
 
 
 [tool.pixi.project]
