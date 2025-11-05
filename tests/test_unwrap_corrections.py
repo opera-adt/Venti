@@ -1,20 +1,22 @@
 """Unit tests for unwrap corrections module."""
 
-import numpy as np
-import pytest
 import tempfile
 from pathlib import Path
+
+import numpy as np
+import pytest
 import xarray as xr
 
 # Optional rasterio import
 try:
     from rasterio.transform import Affine
+
     HAS_RASTERIO = True
 except ImportError:
     HAS_RASTERIO = False
     Affine = None
 
-from venti.unwrap import UnwrapCorrector, read_netcdf, correct_region_offset
+from venti.unwrap import UnwrapCorrector, correct_region_offset, read_netcdf
 
 
 class TestUnwrapCorrector:
@@ -37,9 +39,7 @@ class TestUnwrapCorrector:
         corrector = UnwrapCorrector()
 
         # Create test data with some zeros and NaNs
-        disp = np.array([[1.0, 2.0, 0.0],
-                        [3.0, np.nan, 4.0],
-                        [5.0, 6.0, 7.0]])
+        disp = np.array([[1.0, 2.0, 0.0], [3.0, np.nan, 4.0], [5.0, 6.0, 7.0]])
 
         scaled_disp, disp_mask = corrector._prepare_displacement(disp)
 
@@ -80,13 +80,11 @@ class TestUnwrapCorrector:
         corrector = UnwrapCorrector()
 
         # Create labeled regions
-        labeled = np.array([[1, 1, 2, 2],
-                           [1, 1, 2, 2],
-                           [3, 3, 3, 3]])
+        labeled = np.array([[1, 1, 2, 2], [1, 1, 2, 2], [3, 3, 3, 3]])
 
-        disp = np.array([[1.0, 1.0, 5.0, 5.0],
-                        [1.0, 1.0, 5.0, 5.0],
-                        [10.0, 10.0, 10.0, 10.0]])
+        disp = np.array(
+            [[1.0, 1.0, 5.0, 5.0], [1.0, 1.0, 5.0, 5.0], [10.0, 10.0, 10.0, 10.0]]
+        )
 
         valid_labels = np.array([1, 2, 3])
 
@@ -102,7 +100,6 @@ class TestUnwrapCorrector:
         corrector = UnwrapCorrector(wavelength=0.0555)
 
         # Create medians with known offsets
-        ref_median = 0.0
         medians = np.array([0.0, 0.0555, -0.0555, 0.111, 0.02])
 
         cycles = corrector._compute_unwrap_cycles(medians, ref_label=0)
@@ -150,7 +147,7 @@ class TestReadNetCDF:
     def test_read_netcdf_basic(self):
         """Test reading NetCDF with basic structure."""
         # Create temporary NetCDF file
-        with tempfile.NamedTemporaryFile(suffix='.nc', delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(suffix=".nc", delete=False) as tmp:
             tmp_path = tmp.name
 
         try:
@@ -160,13 +157,13 @@ class TestReadNetCDF:
             disp_data = np.random.rand(len(y), len(x))
             mask_data = np.ones((len(y), len(x)), dtype=bool)
 
-            ds = xr.Dataset({
-                'displacement': (['y', 'x'], disp_data),
-                'water_mask': (['y', 'x'], mask_data)
-            }, coords={
-                'x': x,
-                'y': y
-            })
+            ds = xr.Dataset(
+                {
+                    "displacement": (["y", "x"], disp_data),
+                    "water_mask": (["y", "x"], mask_data),
+                },
+                coords={"x": x, "y": y},
+            )
 
             ds.to_netcdf(tmp_path)
 
@@ -175,15 +172,15 @@ class TestReadNetCDF:
 
             assert disp.shape == disp_data.shape
             assert mask.shape == mask_data.shape
-            assert 'transform' in geo_info
-            assert geo_info['transform'] is not None
+            assert "transform" in geo_info
+            assert geo_info["transform"] is not None
 
         finally:
             Path(tmp_path).unlink()
 
     def test_read_netcdf_with_geotransform(self):
         """Test reading NetCDF with GeoTransform attribute."""
-        with tempfile.NamedTemporaryFile(suffix='.nc', delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(suffix=".nc", delete=False) as tmp:
             tmp_path = tmp.name
 
         try:
@@ -193,31 +190,35 @@ class TestReadNetCDF:
             disp_data = np.random.rand(len(y), len(x))
             mask_data = np.ones((len(y), len(x)), dtype=bool)
 
-            ds = xr.Dataset({
-                'displacement': (['y', 'x'], disp_data),
-                'water_mask': (['y', 'x'], mask_data),
-                'spatial_ref': ([], 0)
-            }, coords={
-                'x': x,
-                'y': y
-            })
+            ds = xr.Dataset(
+                {
+                    "displacement": (["y", "x"], disp_data),
+                    "water_mask": (["y", "x"], mask_data),
+                    "spatial_ref": ([], 0),
+                },
+                coords={"x": x, "y": y},
+            )
 
             # Add GeoTransform attribute
-            ds['spatial_ref'].attrs['GeoTransform'] = '0.0 10.0 0.0 50.0 0.0 -10.0'
-            ds['spatial_ref'].attrs['crs_wkt'] = 'PROJCS["WGS 84 / UTM zone 11N",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",-117],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0],UNIT["metre",1]]'
+            ds["spatial_ref"].attrs["GeoTransform"] = "0.0 10.0 0.0 50.0 0.0 -10.0"
+            ds["spatial_ref"].attrs["crs_wkt"] = (
+                'PROJCS["WGS 84 / UTM zone 11N",GEOGCS["WGS'
+                ' 84",DATUM["WGS_1984",SPHEROID["WGS'
+                ' 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",-117],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0],UNIT["metre",1]]'
+            )
 
             ds.to_netcdf(tmp_path)
 
             # Test reading
             disp, mask, geo_info = read_netcdf(tmp_path)
 
-            assert 'transform' in geo_info
-            assert 'crs' in geo_info
-            assert geo_info['transform'] is not None
-            assert geo_info['crs'] is not None
+            assert "transform" in geo_info
+            assert "crs" in geo_info
+            assert geo_info["transform"] is not None
+            assert geo_info["crs"] is not None
 
             # Check transform values
-            transform = geo_info['transform']
+            transform = geo_info["transform"]
             assert transform.a == 10.0  # x pixel size
             assert transform.e == -10.0  # y pixel size (negative)
 
@@ -226,7 +227,7 @@ class TestReadNetCDF:
 
     def test_read_netcdf_missing_variable(self):
         """Test error handling for missing variables."""
-        with tempfile.NamedTemporaryFile(suffix='.nc', delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(suffix=".nc", delete=False) as tmp:
             tmp_path = tmp.name
 
         try:
@@ -234,12 +235,10 @@ class TestReadNetCDF:
             x = np.arange(0, 100, 10)
             y = np.arange(0, 50, 10)
 
-            ds = xr.Dataset({
-                'water_mask': (['y', 'x'], np.ones((len(y), len(x))))
-            }, coords={
-                'x': x,
-                'y': y
-            })
+            ds = xr.Dataset(
+                {"water_mask": (["y", "x"], np.ones((len(y), len(x))))},
+                coords={"x": x, "y": y},
+            )
 
             ds.to_netcdf(tmp_path)
 
@@ -261,10 +260,7 @@ class TestCorrectRegionOffset:
         mask = np.ones((50, 50), dtype=bool)
 
         corrected = correct_region_offset(
-            input_disp=disp,
-            mask=mask,
-            wavelength=0.0555,
-            min_region_area=20
+            input_disp=disp, mask=mask, wavelength=0.0555, min_region_area=20
         )
 
         assert corrected is not None
@@ -274,7 +270,7 @@ class TestCorrectRegionOffset:
     def test_correct_with_netcdf(self):
         """Test correction with NetCDF file input."""
         # Create temporary NetCDF file
-        with tempfile.NamedTemporaryFile(suffix='.nc', delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(suffix=".nc", delete=False) as tmp:
             tmp_path = tmp.name
 
         try:
@@ -284,21 +280,19 @@ class TestCorrectRegionOffset:
             disp_data = np.random.rand(len(y), len(x))
             mask_data = np.ones((len(y), len(x)), dtype=bool)
 
-            ds = xr.Dataset({
-                'displacement': (['y', 'x'], disp_data),
-                'water_mask': (['y', 'x'], mask_data)
-            }, coords={
-                'x': x,
-                'y': y
-            })
+            ds = xr.Dataset(
+                {
+                    "displacement": (["y", "x"], disp_data),
+                    "water_mask": (["y", "x"], mask_data),
+                },
+                coords={"x": x, "y": y},
+            )
 
             ds.to_netcdf(tmp_path)
 
             # Test correction
             corrected = correct_region_offset(
-                input_disp=tmp_path,
-                wavelength=0.0555,
-                min_region_area=20
+                input_disp=tmp_path, wavelength=0.0555, min_region_area=20
             )
 
             assert corrected is not None
@@ -310,9 +304,9 @@ class TestCorrectRegionOffset:
     @pytest.mark.skipif(not HAS_RASTERIO, reason="rasterio not installed")
     def test_correct_with_output_file(self):
         """Test correction with GeoTIFF output."""
-        with tempfile.NamedTemporaryFile(suffix='.nc', delete=False) as tmp_nc:
+        with tempfile.NamedTemporaryFile(suffix=".nc", delete=False) as tmp_nc:
             nc_path = tmp_nc.name
-        with tempfile.NamedTemporaryFile(suffix='.tif', delete=False) as tmp_tif:
+        with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp_tif:
             tif_path = tmp_tif.name
 
         try:
@@ -322,17 +316,20 @@ class TestCorrectRegionOffset:
             disp_data = np.random.rand(len(y), len(x))
             mask_data = np.ones((len(y), len(x)), dtype=bool)
 
-            ds = xr.Dataset({
-                'displacement': (['y', 'x'], disp_data),
-                'water_mask': (['y', 'x'], mask_data),
-                'spatial_ref': ([], 0)
-            }, coords={
-                'x': x,
-                'y': y
-            })
+            ds = xr.Dataset(
+                {
+                    "displacement": (["y", "x"], disp_data),
+                    "water_mask": (["y", "x"], mask_data),
+                    "spatial_ref": ([], 0),
+                },
+                coords={"x": x, "y": y},
+            )
 
-            ds['spatial_ref'].attrs['GeoTransform'] = '0.0 10.0 0.0 50.0 0.0 -10.0'
-            ds['spatial_ref'].attrs['crs_wkt'] = 'GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]]'
+            ds["spatial_ref"].attrs["GeoTransform"] = "0.0 10.0 0.0 50.0 0.0 -10.0"
+            ds["spatial_ref"].attrs["crs_wkt"] = (
+                'GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS'
+                ' 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]]'
+            )
 
             ds.to_netcdf(nc_path)
 
@@ -341,7 +338,7 @@ class TestCorrectRegionOffset:
                 input_disp=nc_path,
                 wavelength=0.0555,
                 min_region_area=20,
-                output_file=tif_path
+                output_file=tif_path,
             )
 
             assert corrected is not None
@@ -363,14 +360,13 @@ class TestSaveGeoTIFF:
 
         # Create synthetic corrected data
         corrected = np.ma.masked_array(
-            np.random.rand(50, 50),
-            mask=np.zeros((50, 50), dtype=bool)
+            np.random.rand(50, 50), mask=np.zeros((50, 50), dtype=bool)
         )
 
         transform = Affine(10.0, 0.0, 0.0, 0.0, -10.0, 500.0)
-        crs = 'EPSG:32611'
+        crs = "EPSG:32611"
 
-        with tempfile.NamedTemporaryFile(suffix='.tif', delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp:
             tmp_path = tmp.name
 
         try:
@@ -379,7 +375,7 @@ class TestSaveGeoTIFF:
                 output_path=tmp_path,
                 transform=transform,
                 crs=crs,
-                nodata=-9999
+                nodata=-9999,
             )
 
             assert Path(tmp_path).exists()
@@ -392,20 +388,17 @@ class TestSaveGeoTIFF:
         corrector = UnwrapCorrector()
 
         corrected = np.ma.masked_array(
-            np.random.rand(50, 50),
-            mask=np.zeros((50, 50), dtype=bool)
+            np.random.rand(50, 50), mask=np.zeros((50, 50), dtype=bool)
         )
 
-        with tempfile.NamedTemporaryFile(suffix='.tif', delete=False) as tmp:
+        with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp:
             tmp_path = tmp.name
 
         try:
             # Should raise ValueError when transform is missing
-            with pytest.raises(ValueError):
+            with pytest.raises(ValueError, match="transform must be provided"):
                 corrector.save_geotiff(
-                    corrected_disp=corrected,
-                    output_path=tmp_path,
-                    crs='EPSG:32611'
+                    corrected_disp=corrected, output_path=tmp_path, crs="EPSG:32611"
                 )
 
         finally:
@@ -413,5 +406,5 @@ class TestSaveGeoTIFF:
                 Path(tmp_path).unlink()
 
 
-if __name__ == '__main__':
-    pytest.main([__file__, '-v'])
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

@@ -4,7 +4,7 @@
       "reference": "Altamimi et al 2023: https://doi.org/10.1029/2023GL106373",
       "units": {
         "omega_x": "deg/Myr",
-        "omega_y": "deg/Myr", 
+        "omega_y": "deg/Myr",
         "omega_z": "deg/Myr"
       },
       "coordinate_system": "cartesian",
@@ -24,7 +24,7 @@
           "omega_z": 0.1882
         },
         "ARAB": {
-          "name": "Arabian Plate", 
+          "name": "Arabian Plate",
           "omega_x": 0.3135,
           "omega_y": -0.0406,
           "omega_z": 0.3994
@@ -40,7 +40,7 @@
           "omega_x": 0.0576,
           "omega_y": -0.3949,
           "omega_z": 0.2017
-        },      
+        },
         "EURA": {
           "name": "Eurasian Plate",
           "omega_x": -0.0237,

@@ -4,7 +4,7 @@
       "reference": "Altamimi et al 2017: https://doi.org/10.1093/gji/ggx136",
       "units": {
         "omega_x": "deg/Myr",
-        "omega_y": "deg/Myr", 
+        "omega_y": "deg/Myr",
         "omega_z": "deg/Myr"
       },
       "coordinate_system": "cartesian",
@@ -18,7 +18,7 @@
         "omega_z": 0.1874
       },
       "ARAB": {
-        "name": "Arabian Plate", 
+        "name": "Arabian Plate",
         "omega_x": 0.3205,
         "omega_y": -0.0378,
         "omega_z": 0.4011
