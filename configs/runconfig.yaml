@@ -1,0 +1,106 @@
+# Venti Run Configuration
+# This file contains run-specific settings that change between runs.
+# For algorithm parameters that rarely change, see algorithm_parameters.yaml
+#
+# STRUCTURE: This file contains TWO input group sections (similar to algorithm_parameters.yaml):
+# - calibration_input_group: Fill this if workflow_name is 'calibrate'
+# - decomposition_input_group: Fill this if workflow_name is 'decompose'
+#
+# Only the input group matching your workflow_name needs to be filled in.
+
+# ============================================================================
+# CALIBRATION INPUTS
+# Fill this section if doing calibration workflow
+# ============================================================================
+calibration_input_group:
+  # REQUIRED: Directory containing input NetCDF displacement files from OPERA DISP products
+  input_files: path/to/displacement/files
+
+  # REQUIRED: Path to LOS unit vector file (3-band GeoTIFF: east, north, up components)
+  los_file: path/to/los_vectors.tif
+
+  # REQUIRED: Path to water mask file (GeoTIFF, 1=valid land, 0=invalid/water)
+  water_mask: path/to/water_mask.tif
+
+  # OPTIONAL: Directory with tropospheric correction NetCDF files
+  tropo_files: null
+
+  # OPTIONAL: Reference point as [row, col] in pixel coordinates, None for automatic selection
+  reference_point: null
+
+# ============================================================================
+# DECOMPOSITION INPUTS
+# Fill this section if doing decomposition workflow
+# ============================================================================
+decomposition_input_group:
+  # REQUIRED: Directory with ascending geometry displacement files in NetCDF format
+  asc_displacement_files: path/to/asc_displacement/
+
+  # REQUIRED: Directory with descending geometry displacement files in NetCDF format
+  desc_displacement_files: path/to/desc_displacement/
+
+  # REQUIRED: Path to ascending LOS unit vector file (3-band GeoTIFF: east, north, up)
+  asc_los_file: path/to/asc_los_vectors.tif
+
+  # REQUIRED: Path to descending LOS unit vector file (3-band GeoTIFF: east, north, up)
+  desc_los_file: path/to/desc_los_vectors.tif
+
+  # REQUIRED: Path to water mask file (GeoTIFF, 1=valid land, 0=invalid/water)
+  water_mask: path/to/water_mask.tif
+
+  # OPTIONAL: Path to ascending static layers GeoTIFF (temporal coherence, amplitude dispersion, etc.)
+  asc_static_layers: null
+
+  # OPTIONAL: Path to descending static layers GeoTIFF (temporal coherence, amplitude dispersion, etc.)
+  desc_static_layers: null
+
+  # OPTIONAL: Reference point as [row, col] in pixel coordinates, None for automatic selection
+  reference_point: null
+
+# ============================================================================
+# SHARED SETTINGS (used by both workflows)
+# ============================================================================
+
+# Output product paths and version
+product_path_group:
+  # Directory where products will be placed
+  product_path: output
+
+  # Path to scratch directory for intermediate files
+  scratch_path: scratch
+
+  # Path to SAS output directory
+  sas_output_path: output
+
+  # Version of the product in <major>.<minor> format
+  product_version: '1.0'
+
+# Primary executable configuration - SET WORKFLOW HERE
+primary_executable:
+  # Product type of the workflow
+  # Options: VENTI_CALIBRATION, VENTI_DECOMPOSITION
+  product_type: VENTI_CALIBRATION
+
+  # Name of the workflow to execute
+  # Options: calibrate, decompose
+  # IMPORTANT: This determines which input_group section above is required!
+  workflow_name: calibrate
+
+# Worker configuration for processing
+worker_settings:
+  # Whether to use GPU for processing (if available)
+  gpu_enabled: false
+
+  # Number of threads to use per worker (sets OMP_NUM_THREADS)
+  threads_per_worker: 1
+
+  # Size (rows, columns) of blocks of data to load at a time
+  block_shape:
+    - 512
+    - 512
+
+# Path to output log file (in addition to logging to stderr)
+log_file: null
+
+# Don't resolve filepaths that are given as relative to be absolute
+keep_paths_relative: false

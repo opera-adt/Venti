@@ -1,0 +1,94 @@
+# Venti Algorithm Parameters
+# This file contains algorithm-specific settings with defaults that work for most locations.
+# These parameters typically don't change between runs.
+
+calibration_options:
+  # GNSS grid type: 'constant' uses velocity-based interpolation,
+  # 'variable' uses epoch-specific GNSS positions
+  # Type: string
+  # Options: ['constant', 'variable']
+  grid_type: constant
+
+  # GNSS reference frame to use
+  # Type: string
+  # Options: ['IGS14', 'IGS20']
+  reference_frame: IGS20
+
+  # Starting year for velocity estimation (for constant grid type)
+  # GNSS velocities will be computed from this year forward
+  # Type: number
+  starting_year: 2014.0
+
+  # Whether to correct islands for unwrap errors using watershed segmentation
+  # Helps fix phase discontinuities in unwrapped interferograms
+  # Type: boolean
+  unwrap_error_correction: true
+
+  # Downsample factor for performing plane fitting at lower resolution
+  # 1 means no downsampling, 2 means half resolution, etc.
+  # Higher values = faster processing but less detail
+  # Type: integer
+  downsample_factor: 1
+
+  # Window size for plane fitting in meters
+  # Larger windows smooth more but may miss local variations
+  # Typical values: 10000-50000
+  # Type: number
+  window_size_meters: 30000.0
+
+  # Input data posting (pixel spacing) in meters
+  # Used for coordinate transformations
+  # Type: number
+  posting_meters: 30.0
+
+decomposition_options:
+  # Method for least-squares inversion
+  # Type: string
+  # Options: ['weighted_least_squares', 'ridge', 'lasso']
+  inversion_method: weighted_least_squares
+
+  # Whether to compute and propagate uncertainties to output
+  # Type: boolean
+  uncertainty_propagation: true
+
+  # Minimum number of viewing geometries required for decomposition
+  # 2 or more geometries needed to solve for 3D displacement
+  # Type: integer
+  min_geometries: 2
+
+  # Only solve for vertical component (assume horizontal motion is zero)
+  # Useful when only one viewing geometry is available
+  # Type: boolean
+  vertical_only: false
+
+  # How to weight different viewing geometries in inversion
+  # Type: string
+  # Options: ['uniform', 'temporal_coherence', 'uncertainty']
+  geometry_weighting: temporal_coherence
+
+  # Minimum quality metric for including pixels in decomposition
+  # Pixels below this threshold will be masked out
+  # Type: number (0.0 to 1.0)
+  quality_threshold: 0.5
+
+output_options:
+  # GDAL creation options for GeoTIFF output files
+  # These control compression, tiling, and other file properties
+  # Type: array of strings
+  gtiff_creation_options:
+    - COMPRESS=lzw
+    - ZLEVEL=4
+    - BIGTIFF=yes
+    - TILED=yes
+    - BLOCKXSIZE=128
+    - BLOCKYSIZE=128
+
+  # Whether to add overviews (pyramids) to output GeoTIFFs
+  # Overviews improve visualization performance but increase file size
+  # Type: boolean
+  add_overviews: false
+
+  # Compression method for output files
+  # Type: string
+  # Options: ['lzw', 'deflate', 'none']
+  compression: lzw
