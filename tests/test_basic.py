@@ -14,6 +14,7 @@ def test_can_import_unwrap():
     """Test that we can import the unwrap module without triggering pyproj."""
     # This should not trigger models import
     from venti.unwrap import UnwrapCorrector
+
     assert UnwrapCorrector is not None
 
 
@@ -55,5 +56,5 @@ def test_simple_correction():
     assert isinstance(corrected, np.ma.MaskedArray)
 
 
-if __name__ == '__main__':
-    pytest.main([__file__, '-v'])
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

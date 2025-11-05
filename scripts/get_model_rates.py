@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """DISP Frame Model Generator.
 
 This script generates GIA and plate motion model grids for specific DISP
@@ -12,21 +11,19 @@ Example usage:
     python get_model_rates.py 5678 --output /path/to/output --plate PCFC
 """
 
-import sys
-from collections import namedtuple
+from contextlib import suppress
 from pathlib import Path
-from typing import Any, Dict, Literal, Tuple
+from typing import Any, Literal, NamedTuple
 
 import geopandas as gpd
 import numpy as np
+import opera_utils
 import rasterio
 import tyro
-from tyro import conf
 from pyproj import Transformer
 from rasterio.transform import Affine, from_bounds
 from rasterio.warp import Resampling, reproject
 
-import venti
 from venti.log import get_logger
 from venti.models import load_gia, load_itrf, plate_motion
 
@@ -39,23 +36,49 @@ SUPPORTED_GIA_MODELS = ["CARON", "ICE6"]
 
 logger = get_logger("venti", enable_file_logging=False)
 
-FrameUTM = namedtuple(
-    'FrameUTM',
-    ['crs', 'bounds', 'transform', 'width', 'height']
-)
+
+class FrameUTM(NamedTuple):
+    """Represents a UTM frame with coordinate system.
+
+    Attributes
+    ----------
+    crs : object
+        Coordinate reference system of the UTM frame.
+    bounds : tuple
+        Bounding box coordinates of the frame (minx, miny, maxx, maxy).
+    transform : Affine
+        Affine transform for rasterization.
+    width : int
+        Width of the raster grid in pixels.
+    height : int
+        Height of the raster grid in pixels.
+
+    """
+
+    crs: Any
+    bounds: Any
+    transform: Any
+    width: int
+    height: int
 
 
-def get_frame_utm_transform(frame_gdf: gpd.GeoDataFrame,
-                            cell_size: int = DEFAULT_CELL_SIZE) -> FrameUTM:
-    """Get UTM transform parameters for a GeoDataFrame frame.
+def get_frame_utm_transform(
+    frame_gdf: gpd.GeoDataFrame, cell_size: int = DEFAULT_CELL_SIZE
+) -> FrameUTM:
+    """Compute UTM transform and grid dimensions for a GeoDataFrame frame.
 
-    Args:
-        frame_gdf: GeoDataFrame containing the frame geometry.
-        cell_size: Cell size in meters for the grid (default: 30).
+    Parameters
+    ----------
+    frame_gdf : GeoDataFrame
+        GeoDataFrame containing the frame geometry.
+    cell_size : int, optional
+        Grid cell size in meters (default is 30).
 
-    Returns:
-        FrameUTM namedtuple containing CRS, bounds, transform, width,
-        and height.
+    Returns
+    -------
+    FrameUTM
+        NamedTuple containing CRS, bounds, transform, width, and height.
+
     """
     utm_crs = frame_gdf.estimate_utm_crs()
     selected_frame_utm = frame_gdf.to_crs(utm_crs)
@@ -72,35 +95,45 @@ def get_frame_utm_transform(frame_gdf: gpd.GeoDataFrame,
         bounds=selected_frame_utm.total_bounds,
         transform=dst_transform,
         width=target_width,
-        height=target_height
+        height=target_height,
     )
 
 
-def make_point_grid(gdf: gpd.GeoDataFrame,
-                    cell_size: float = DEFAULT_GRID_POSTING,
-                    target_crs: str = "EPSG:4326") -> Tuple[np.ndarray,
-                                                            np.ndarray]:
-    """Create a regular point grid within a polygon GeoDataFrame.
+def make_point_grid(
+    gdf: gpd.GeoDataFrame,
+    cell_size: float = DEFAULT_GRID_POSTING,
+    target_crs: str = "EPSG:4326",
+) -> tuple[np.ndarray, np.ndarray]:
+    """Generate a regular point grid within a polygon GeoDataFrame.
 
-    Args:
-        gdf: Input polygon(s), assumed to be in EPSG:4326.
-        cell_size: Spacing between points in meters (default: 50,000 = 50 km).
-        target_crs: CRS for output grid (default: "EPSG:4326").
+    Parameters
+    ----------
+    gdf : GeoDataFrame
+        Input polygon(s), assumed to be in EPSG:4326.
+    cell_size : float, optional
+        Spacing between points in meters (default is 50,000 = 50 km).
+    target_crs : str, optional
+        CRS for output grid (default is "EPSG:4326").
 
-    Returns:
-        Tuple of (x, y) coordinate arrays where:
-        - x: X coordinates of grid points (longitude if EPSG:4326).
-        - y: Y coordinates of grid points (latitude if EPSG:4326).
+    Returns
+    -------
+    x : ndarray
+        X coordinates of grid points (longitude if EPSG:4326).
+    y : ndarray
+        Y coordinates of grid points (latitude if EPSG:4326).
 
-    Raises:
-        ValueError: If input GeoDataFrame is empty or invalid.
+    Raises
+    ------
+    ValueError
+        If input GeoDataFrame is empty or invalid.
+
     """
     if gdf.empty:
-        raise ValueError("Input GeoDataFrame is empty")
+        msg = "Input GeoDataFrame is empty"
+        raise ValueError(msg)
 
     if gdf.crs is None:
-        logger.warning("No CRS defined for input GeoDataFrame, "
-                       "assuming EPSG:4326")
+        logger.warning("No CRS defined for input GeoDataFrame, assuming EPSG:4326")
         gdf = gdf.set_crs("EPSG:4326")
 
     try:
@@ -119,75 +152,77 @@ def make_point_grid(gdf: gpd.GeoDataFrame,
         logger.info(f"Grid dimensions: {width} x {length} points")
 
         # Generate grid coordinates
-        gridy, gridx = np.mgrid[maxy:miny:length*1j, minx:maxx:width*1j]
+        gridy, gridx = np.mgrid[
+            maxy : miny : complex(length), minx : maxx : complex(width)  # type: ignore[misc]
+        ]
 
         # Transform back to target CRS
-        transformer = Transformer.from_crs(utm_crs, target_crs,
-                                           always_xy=True)
+        transformer = Transformer.from_crs(utm_crs, target_crs, always_xy=True)
         x, y = transformer.transform(gridx, gridy)
 
+    except Exception:
+        logger.exception("Error generating grid")
+        raise
+    else:
         logger.info(f"Generated grid with {x.size} points")
         return x, y
 
-    except Exception as e:
-        logger.error(f"Error generating grid: {e}")
-        raise
 
 def _validate_itrf_year(date: int) -> None:
-    """Validate ITRF year input.
+    """Validate the ITRF reference year.
 
-    Args:
-        date: ITRF reference year.
+    Parameters
+    ----------
+    date : int
+        ITRF reference year.
 
-    Raises:
-        ValueError: If unsupported ITRF year is specified.
+    Raises
+    ------
+    ValueError
+        If an unsupported ITRF year is specified.
+
     """
     if date not in SUPPORTED_ITRF_YEARS:
-        raise ValueError(
-            f"ITRF year must be one of {SUPPORTED_ITRF_YEARS}, got {date}"
-        )
+        msg = f"ITRF year must be one of {SUPPORTED_ITRF_YEARS}, got {date}"
+        raise ValueError(msg)
 
 
-def get_frame_pmm(frame_gdf: gpd.GeoDataFrame,
-                  plate: str = "NOAM",
-                  date: int = 2014,
-                  grid_posting: float = DEFAULT_PMM_GRID_POSTING
-                  ) -> Tuple[np.ndarray, np.ndarray, Dict[str, Any]]:
+def get_frame_pmm(
+    frame_gdf: gpd.GeoDataFrame,
+    plate: str = "NOAM",
+    date: int = 2014,
+    grid_posting: float = DEFAULT_PMM_GRID_POSTING,
+) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
     """Generate plate motion model (PMM) velocities for a given frame.
 
-    This function loads International Terrestrial Reference Frame (ITRF)
-    plate motion data and models horizontal velocities on a regular grid
-    within the specified geographic frame.
+    Parameters
+    ----------
+    frame_gdf : GeoDataFrame
+        GeoDataFrame representing the area of interest.
+    plate : str, optional
+        Tectonic plate identifier (default is "NOAM").
+    date : int, optional
+        ITRF reference year (default is 2014).
+    grid_posting : float, optional
+        Grid spacing in meters (default is 10000).
 
-    Args:
-        frame_gdf: GeoDataFrame representing the area of interest for
-            modeling plate motion.
-        plate: Plate identifier for the tectonic plate of interest
-            (e.g., "NOAM" for North American plate).
-        date: ITRF reference year. Supported values are 2014 and 2020.
-        grid_posting: Grid cell size in meters for the velocity model
-            grid spacing.
+    Returns
+    -------
+    pmm_east_velocity : ndarray
+        2D array of east-west velocity components (m/year).
+    pmm_north_velocity : ndarray
+        2D array of north-south velocity components (m/year).
+    pmm_attributes : dict
+        Dictionary containing grid metadata and model information.
 
-    Returns:
-        Tuple containing:
-        - pmm_east_velocity: 2D array of east-west velocity components
-          (m/year).
-        - pmm_north_velocity: 2D array of north-south velocity components
-          (m/year).
-        - pmm_attributes: Dictionary containing grid metadata and model
-          information.
+    Raises
+    ------
+    ValueError
+        If an unsupported ITRF year is specified.
 
-    Raises:
-        ValueError: If an unsupported ITRF year is specified.
-
-    Notes:
-        The function creates a regular grid with the specified posting and
-        models plate velocities using Euler pole parameters from the ITRF
-        solution. Grid dimensions and coordinate reference system are
-        preserved in the returned attributes dictionary.
     """
     # Validate ITRF date input
-    _validate_itrf_year(date) 
+    _validate_itrf_year(date)
 
     # Load ITRF plate motion model parameters
     logger.info(f"Loading ITRF{date} plate motion data for plate '{plate}'")
@@ -195,30 +230,28 @@ def get_frame_pmm(frame_gdf: gpd.GeoDataFrame,
 
     # Generate regular grid for plate motion modeling
     logger.debug(f"Creating grid with {grid_posting/1000:.1f} km spacing")
-    grid_longitudes, grid_latitudes = make_point_grid(
-        frame_gdf, cell_size=grid_posting
-    )
+    grid_longitudes, grid_latitudes = make_point_grid(frame_gdf, cell_size=grid_posting)
 
     # Extract grid dimensions for raster attributes
     grid_height, grid_width = grid_longitudes.shape
 
     # Create geospatial transform for the grid
     grid_transform = from_bounds(
-        *frame_gdf.total_bounds,
-        width=grid_width,
-        height=grid_height
+        *frame_gdf.total_bounds, width=grid_width, height=grid_height
     )
 
     # Model horizontal plate velocities using Euler pole parameters
-    logger.info("Computing plate motion velocities from Euler pole "
-                "parameters")
+    logger.info("Computing plate motion velocities from Euler pole parameters")
     modeled_velocities = plate_motion.model_plate_velocities(
         grid_longitudes.ravel(),
         grid_latitudes.ravel(),
-        plate_motion_model['omega_x'],
-        plate_motion_model['omega_y'],
-        plate_motion_model['omega_z']
+        plate_motion_model["omega_x"],
+        plate_motion_model["omega_y"],
+        plate_motion_model["omega_z"],
     )
+
+    if isinstance(modeled_velocities, tuple):
+        modeled_velocities = modeled_velocities[0]
 
     # Reshape velocity components back to 2D grid
     pmm_east_velocity = modeled_velocities[:, 0].reshape(
@@ -230,153 +263,150 @@ def get_frame_pmm(frame_gdf: gpd.GeoDataFrame,
 
     # Compile grid and model metadata
     pmm_attributes = {
-        'crs': frame_gdf.crs,
-        'width': grid_width,
-        'height': grid_height,
-        'transform': grid_transform,
-        'nodata': np.nan,
-        'plate': plate,
-        'model': f'ITRF{date}',
-        'grid_posting_m': grid_posting,
-        'units': 'm/year'
+        "crs": frame_gdf.crs,
+        "width": grid_width,
+        "height": grid_height,
+        "transform": grid_transform,
+        "nodata": np.nan,
+        "plate": plate,
+        "model": f"ITRF{date}",
+        "grid_posting_m": grid_posting,
+        "units": "m/year",
     }
 
-    logger.info(f"Generated {grid_width}x{grid_height} velocity grid "
-                f"for {plate} plate")
+    logger.info(f"Generated {grid_width}x{grid_height} velocity grid for {plate} plate")
 
     return pmm_east_velocity, pmm_north_velocity, pmm_attributes
 
 
-def get_gia(frame_gdf: gpd.GeoDataFrame,
-            model: str = "CARON") -> Tuple[Any, Dict[str, Any]]:
+def get_gia(
+    frame_gdf: gpd.GeoDataFrame, model: str = "CARON"
+) -> tuple[Any, dict[str, Any]]:
     """Load and process Glacial Isostatic Adjustment (GIA) data for a frame.
 
-    Args:
-        frame_gdf: GeoDataFrame representing the area of interest for
-            clipping the GIA model.
-        model: Name of the GIA model to use. Supported models are
-            "CARON" and "ICE6".
+    Parameters
+    ----------
+    frame_gdf : GeoDataFrame
+        GeoDataFrame representing the area of interest for clipping the GIA model.
+    model : str, optional
+        Name of the GIA model to use (default is 'CARON'). Options: 'CARON', 'ICE6'.
 
-    Returns:
-        Tuple containing:
-        - gia_raster: Rasterized GIA data.
-        - gia_attr: Dictionary of attributes including the model name.
+    Returns
+    -------
+    gia_raster : object
+        Rasterized GIA data.
+    gia_attr : dict
+        Dictionary of attributes including the model name.
 
-    Raises:
-        ValueError: If an unsupported GIA model is specified.
+    Raises
+    ------
+    ValueError
+        If an unsupported GIA model is specified.
 
-    Notes:
-        The function clips the GIA model to the provided frame, rasterizes
-        the data using the 'vlm_rate' field, and includes model metadata
-        in the attributes.
-
-        For ICE6 model, temporary files are automatically cleaned up after
-        processing.
     """
     # Normalize model name for comparison
     model_upper = model.upper()
 
     # Load the appropriate GIA model
-    if model_upper == 'CARON':
+    if model_upper == "CARON":
         gia_model = load_gia.load_caron_model(load_gia.CARON_GIA)
 
-    elif model_upper == 'ICE6':
+    elif model_upper == "ICE6":
         # Download and load ICE6G model data
         ice6_file_path = Path(load_gia.download_ice6g_data())
         gia_model = load_gia.load_ice6g_model(ice6_file_path)
 
         # Clean up temporary file
-        try:
+        with suppress(FileNotFoundError):
             ice6_file_path.unlink()
-        except FileNotFoundError:
-            # File may have already been removed
-            pass
 
     else:
-        raise ValueError(
-            f"GIA model must be one of {SUPPORTED_GIA_MODELS}, got '{model}'"
-        )
+        msg = f"GIA model must be one of {SUPPORTED_GIA_MODELS}, got '{model}'"
+        raise ValueError(msg)
 
     # Clip GIA model to the specified frame area of interest
     gia_frame = load_gia.clip_gia_df(gia_model, aoi=frame_gdf)
 
     # Rasterize the GIA data using vertical land motion rate
-    # TODO: Add uncertainty 
-    gia_raster, gia_attributes = load_gia.rasterize_gdf(gia_frame,
-                                                        'vlm_rate')
+    # TODO: Add uncertainty
+    gia_raster, gia_attributes = load_gia.rasterize_gdf(gia_frame, "vlm_rate")
 
     # Add model metadata to attributes
-    gia_attributes['model'] = model
+    gia_attributes["model"] = model
 
     return gia_raster, gia_attributes
 
 
 def main(
     frame_id: int,
-    output: str = 'output',
-    plate: Literal["NOAM", "EURA", "PCFC", "NAZC", "SOAM", "AFRC", "ANTA", 
-                   "ARAB", "INDI", "AUST", "CARI", "COCO", "JUAN", "PHIL"] = "NOAM",
+    output: str = "output",
+    plate: Literal[
+        "NOAM",
+        "EURA",
+        "PCFC",
+        "NAZC",
+        "SOAM",
+        "AFRC",
+        "ANTA",
+        "ARAB",
+        "INDI",
+        "AUST",
+        "CARI",
+        "COCO",
+        "JUAN",
+        "PHIL",
+    ] = "NOAM",
     itrf: Literal[2014, 2020] = 2014,
-    gia: Literal["CARON", "ICE6"] = "CARON"
+    gia: Literal["CARON", "ICE6"] = "CARON",
 ) -> None:
     """Generate DISP frame model with PMM and GIA data.
 
-    This function creates raster files showing horizontal and vertical velocity
-    components for the specified tectonic plate and GIA model.
+    Parameters
+    ----------
+    frame_id : int
+        ID of the DISP frame to process.
+    output : str, optional
+        Output directory path (default is "output").
+    plate : str, optional
+        Tectonic plate identifier (default is "NOAM").
+    itrf : {2014, 2020}, optional
+        ITRF reference year (default is 2014).
+    gia : {'CARON', 'ICE6'}, optional
+        GIA model name (default is 'CARON').
 
-    Args:
-        frame_id: ID of the DISP frame to process. Must be a valid frame ID
-            from the OPERA DISP frame database.
-        output: Output directory path where the generated raster file will be
-            saved. The directory will be created if it doesn't exist.
-        plate: Tectonic plate identifier. Available options:
-            NOAM (North American), EURA (Eurasian), PCFC (Pacific),
-            NAZC (Nazca), SOAM (South American), AFRC (African),
-            ANTA (Antarctic), ARAB (Arabian), INDI (Indian),
-            AUST (Australian), CARI (Caribbean), COCO (Cocos),
-            JUAN (Juan de Fuca), PHIL (Philippine Sea).
-        itrf: ITRF (International Terrestrial Reference Frame) reference year.
-            Available options: 2014 (ITRF2014), 2020 (ITRF2020).
-        gia: GIA (Glacial Isostatic Adjustment) model name. Available options:
-            CARON (Caron et al. 2018), ICE6 (ICE-6G_D Peltier et al. 2018).
+    Raises
+    ------
+    FileNotFoundError
+        If DISP frame database file is not found.
+    ValueError
+        If frame_id is not found in the database or invalid parameters are provided.
 
-    Raises:
-        FileNotFoundError: If DISP frame database file is not found.
-        ValueError: If frame_id is not found in the database, or if invalid
-            parameters are provided.
     """
-    # DISP frame database path
-    data_path = Path(venti.__path__[0]).parents[1]
-
     # Set output directory
     output_dir = Path(output)
     output_dir.mkdir(exist_ok=True)
 
     # Create output filename
-    output_name = (output_dir /
-                   f"frame_{frame_id}_{plate}_ITRF{itrf}_GIA_{gia}_rates.tif")
+    output_name = (
+        output_dir / f"frame_{frame_id}_{plate}_ITRF{itrf}_GIA_{gia}_rates.tif"
+    )
 
-    # Check for required data files
-    frame_file = data_path / "data/opera_disp_frame.geojson"
-    if not frame_file.exists():
-        raise FileNotFoundError(f"DISP frame database not found: "
-                                f"{frame_file}")
-
-    # Load DISP frame database
-    logger.info(f"Loading DISP frame database from {frame_file}")
-    disp_frame_db = gpd.read_file(frame_file)
+    # Get frame_df with opera_utils
+    logger.info("Loading DISP frame database")
+    disp_frame_db = opera_utils.get_frame_geodataframe()
 
     # Select requested frame
-    selected_frame = disp_frame_db[disp_frame_db['fid'] == frame_id]
+    selected_frame = disp_frame_db[disp_frame_db.index == frame_id]
     if selected_frame.empty:
-        available_fids = disp_frame_db['fid'].unique()
-        raise ValueError(f"Frame ID {frame_id} not found. "
-                         f"Available IDs: {available_fids}")
+        available_fids = disp_frame_db.index.unique()
+        msg = f"Frame ID {frame_id} not found. Available IDs: {available_fids}"
+        raise ValueError(msg)
     logger.info(f"Selected frame {frame_id}")
 
     # Get PMM for requested frame
     pmm_east_velocity, pmm_north_velocity, pmm_attributes = get_frame_pmm(
-        selected_frame, plate=plate, date=itrf)
+        selected_frame, plate=plate, date=itrf
+    )
 
     # Get GIA for requested frame
     gia_model, gia_attributes = get_gia(selected_frame, model=gia)
@@ -384,22 +414,23 @@ def main(
     # Export to DISP frame
     output_frame = get_frame_utm_transform(selected_frame)
     resampling_mode = Resampling.bilinear
-    
+
     with rasterio.open(
-            output_name, "w",
-            height=output_frame.height,
-            width=output_frame.width,
-            count=3,
-            dtype="float32",
-            crs=output_frame.crs,
-            transform=output_frame.transform,
-            nodata=np.nan,
-            compress='lzw',
-            tiled=True,
-            blockxsize=512,
-            blockysize=512,
-            predictor=2,
-            interleave='band',
+        output_name,
+        "w",
+        height=output_frame.height,
+        width=output_frame.width,
+        count=3,
+        dtype="float32",
+        crs=output_frame.crs,
+        transform=output_frame.transform,
+        nodata=np.nan,
+        compress="lzw",
+        tiled=True,
+        blockxsize=512,
+        blockysize=512,
+        predictor=2,
+        interleave="band",
     ) as dst:
         dst.set_band_description(1, "North-South (mm/yr)")
         dst.set_band_description(2, "East-West (mm/yr)")
@@ -407,12 +438,12 @@ def main(
 
         # PMM reproject parameters
         pmm_reproject_params = {
-            'src_transform': pmm_attributes['transform'],
-            'src_crs': pmm_attributes['crs'],
-            'dst_transform': output_frame.transform,
-            'dst_crs': output_frame.crs,
-            'resampling': resampling_mode,
-            'dst_nodata': np.nan
+            "src_transform": pmm_attributes["transform"],
+            "src_crs": pmm_attributes["crs"],
+            "dst_transform": output_frame.transform,
+            "dst_crs": output_frame.crs,
+            "resampling": resampling_mode,
+            "dst_nodata": np.nan,
         }
 
         # Write PMM North-South rates
@@ -420,7 +451,7 @@ def main(
         reproject(
             source=pmm_north_velocity,
             destination=rasterio.band(dst, 1),
-            **pmm_reproject_params
+            **pmm_reproject_params,
         )
 
         # Write PMM East-West rates
@@ -428,25 +459,23 @@ def main(
         reproject(
             source=pmm_east_velocity,
             destination=rasterio.band(dst, 2),
-            **pmm_reproject_params
+            **pmm_reproject_params,
         )
 
         # GIA reproject parameters
         gia_reproject_params = {
-            'src_transform': gia_attributes['transform'],
-            'src_crs': gia_attributes['crs'],
-            'dst_transform': output_frame.transform,
-            'dst_crs': output_frame.crs,
-            'resampling': resampling_mode,
-            'dst_nodata': np.nan
+            "src_transform": gia_attributes["transform"],
+            "src_crs": gia_attributes["crs"],
+            "dst_transform": output_frame.transform,
+            "dst_crs": output_frame.crs,
+            "resampling": resampling_mode,
+            "dst_nodata": np.nan,
         }
 
         # Write GIA VLM rates
         logger.info(f"Writing GIA VLM rates: {output_name} [band: 3]")
         reproject(
-            source=gia_model,
-            destination=rasterio.band(dst, 3),
-            **gia_reproject_params
+            source=gia_model, destination=rasterio.band(dst, 3), **gia_reproject_params
         )
 
     logger.info(f"Successfully wrote output to: {output_name}")

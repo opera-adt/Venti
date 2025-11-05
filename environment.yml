@@ -5,4 +5,26 @@ dependencies:
   - python>=3.9
   - pip>=21.3  # https://pip.pypa.io/en/stable/reference/build-system/pyproject-toml/#editable-installation
   - git  # for pip install, due to setuptools_scm
+  # Core
+  - numpy
+  - pandas
+  - scipy
+  - matplotlib
+  # Geospatial / remote sensing stack
+  - rasterio
   - geopandas
+  - pyproj
+  - rioxarray
+  - xarray
+  - netcdf4
+  - h5py
+  # Cloud + I/O
+  - fsspec
+  - s3fs
+  - boto3
+  - requests
+  # Utility + configuration
+  - click
+  - pyyaml
+  - tqdm
+  - pre-commit
