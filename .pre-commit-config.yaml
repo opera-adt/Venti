@@ -34,5 +34,6 @@ repos:
     rev: "v1.16.0"
     hooks:
       - id: mypy
+        args: [--no-site-packages]
         additional_dependencies:
         - types-requests
