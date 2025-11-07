@@ -8,14 +8,15 @@ This module provides configuration management split into two files:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional, Literal
-from pydantic import BaseModel, Field, field_validator
-import yaml
+from typing import Literal
 
+import yaml  # type: ignore[import-untyped]
+from pydantic import BaseModel, Field, field_validator
 
 # ============================================================================
 # Algorithm Parameters (algorithm_parameters.yaml)
 # ============================================================================
+
 
 class CalibrationOptions(BaseModel):
     """Calibration algorithm options.
@@ -36,39 +37,41 @@ class CalibrationOptions(BaseModel):
         Window size for plane fitting in meters
     posting_meters : float
         Input data posting in meters
+
     """
 
     grid_type: Literal["constant", "variable"] = Field(
         "constant",
-        description="GNSS grid type: 'constant' uses velocity-based interpolation, "
-                   "'variable' uses epoch-specific GNSS positions"
+        description=(
+            "GNSS grid type: 'constant' uses velocity-based interpolation, "
+            "'variable' uses epoch-specific GNSS positions"
+        ),
     )
     reference_frame: str = Field(
-        "IGS20",
-        description="GNSS reference frame (IGS14 or IGS20)"
+        "IGS20", description="GNSS reference frame (IGS14 or IGS20)"
     )
     starting_year: float = Field(
         2014.0,
-        description="Starting year for velocity estimation (for constant grid type)"
+        description="Starting year for velocity estimation (for constant grid type)",
     )
     unwrap_error_correction: bool = Field(
         True,
-        description="Whether to correct islands for unwrap errors using watershed segmentation"
+        description=(
+            "Whether to correct islands for unwrap errors using watershed segmentation"
+        ),
     )
     downsample_factor: int = Field(
         1,
         ge=1,
-        description="Downsample factor for performing plane fitting at lower resolution"
+        description=(
+            "Downsample factor for performing plane fitting at lower resolution"
+        ),
     )
     window_size_meters: float = Field(
-        30000.0,
-        gt=0,
-        description="Window size for plane fitting in meters"
+        30000.0, gt=0, description="Window size for plane fitting in meters"
     )
     posting_meters: float = Field(
-        30.0,
-        gt=0,
-        description="Input data posting (pixel spacing) in meters"
+        30.0, gt=0, description="Input data posting (pixel spacing) in meters"
     )
 
 
@@ -87,34 +90,35 @@ class DecompositionOptions(BaseModel):
         Only solve for vertical component (ignore horizontal)
     geometry_weighting : str
         How to weight different geometries
+
     """
 
     inversion_method: Literal["weighted_least_squares", "ridge", "lasso"] = Field(
-        "weighted_least_squares",
-        description="Method for least-squares inversion"
+        "weighted_least_squares", description="Method for least-squares inversion"
     )
     uncertainty_propagation: bool = Field(
-        True,
-        description="Whether to compute and propagate uncertainties to output"
+        True, description="Whether to compute and propagate uncertainties to output"
     )
     min_geometries: int = Field(
         2,
         ge=1,
-        description="Minimum number of viewing geometries required for decomposition"
+        description="Minimum number of viewing geometries required for decomposition",
     )
     vertical_only: bool = Field(
         False,
-        description="Only solve for vertical component (assume horizontal motion is zero)"
+        description=(
+            "Only solve for vertical component (assume horizontal motion is zero)"
+        ),
     )
     geometry_weighting: Literal["uniform", "temporal_coherence", "uncertainty"] = Field(
         "temporal_coherence",
-        description="How to weight different viewing geometries in inversion"
+        description="How to weight different viewing geometries in inversion",
     )
     quality_threshold: float = Field(
         0.5,
         ge=0.0,
         le=1.0,
-        description="Minimum quality metric for including pixels in decomposition"
+        description="Minimum quality metric for including pixels in decomposition",
     )
 
 
@@ -129,6 +133,7 @@ class OutputOptions(BaseModel):
         Whether to add overviews to output GeoTIFFs
     compression : str
         Compression method for output files
+
     """
 
     gtiff_creation_options: list[str] = Field(
@@ -140,16 +145,12 @@ class OutputOptions(BaseModel):
             "BLOCKXSIZE=128",
             "BLOCKYSIZE=128",
         ],
-        description="GDAL creation options for GeoTIFF output files"
+        description="GDAL creation options for GeoTIFF output files",
     )
     add_overviews: bool = Field(
-        False,
-        description="Whether to add overviews (pyramids) to output GeoTIFFs"
+        False, description="Whether to add overviews (pyramids) to output GeoTIFFs"
     )
-    compression: str = Field(
-        "lzw",
-        description="Compression method for output files"
-    )
+    compression: str = Field("lzw", description="Compression method for output files")
 
 
 class AlgorithmParameters(BaseModel):
@@ -161,15 +162,14 @@ class AlgorithmParameters(BaseModel):
 
     calibration_options: CalibrationOptions = Field(
         default_factory=CalibrationOptions,
-        description="Settings for calibration workflow"
+        description="Settings for calibration workflow",
     )
     decomposition_options: DecompositionOptions = Field(
         default_factory=DecompositionOptions,
-        description="Settings for decomposition workflow"
+        description="Settings for decomposition workflow",
     )
     output_options: OutputOptions = Field(
-        default_factory=OutputOptions,
-        description="Output file format options"
+        default_factory=OutputOptions, description="Output file format options"
     )
 
     model_config = {
@@ -182,9 +182,10 @@ class AlgorithmParameters(BaseModel):
         """Load algorithm parameters from YAML file."""
         yaml_path = Path(yaml_path)
         if not yaml_path.exists():
-            raise FileNotFoundError(f"Algorithm parameters file not found: {yaml_path}")
+            msg = f"Algorithm parameters file not found: {yaml_path}"
+            raise FileNotFoundError(msg)
 
-        with open(yaml_path, 'r') as f:
+        with open(yaml_path) as f:
             data = yaml.safe_load(f)
 
         return cls(**data)
@@ -192,16 +193,17 @@ class AlgorithmParameters(BaseModel):
     def to_yaml(self, yaml_path: str | Path) -> None:
         """Save algorithm parameters to YAML file."""
         yaml_path = Path(yaml_path)
-        data = self.model_dump(mode='python')
+        data = self.model_dump(mode="python")
 
         yaml_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(yaml_path, 'w') as f:
+        with open(yaml_path, "w") as f:
             yaml.dump(data, f, default_flow_style=False, sort_keys=False)
 
 
 # ============================================================================
 # Run Configuration (runconfig.yaml)
 # ============================================================================
+
 
 class CalibrationInputGroup(BaseModel):
     """Input file group for calibration workflow.
@@ -218,30 +220,39 @@ class CalibrationInputGroup(BaseModel):
         Directory with tropospheric correction files
     reference_point : tuple[int, int], optional
         Reference point (row, col), None for auto-select
+
     """
 
     input_files: Path = Field(
         ...,
-        description="Directory containing input NetCDF displacement files from OPERA DISP products"
+        description=(
+            "Directory containing input NetCDF displacement files from OPERA DISP"
+            " products"
+        ),
     )
     los_file: Path = Field(
         ...,
-        description="Path to LOS unit vector file (3-band GeoTIFF: east, north, up components)"
+        description=(
+            "Path to LOS unit vector file (3-band GeoTIFF: east, north, up components)"
+        ),
     )
     water_mask: Path = Field(
         ...,
-        description="Path to water mask file (GeoTIFF, 1=valid land, 0=invalid/water)"
+        description="Path to water mask file (GeoTIFF, 1=valid land, 0=invalid/water)",
     )
-    tropo_files: Optional[Path] = Field(
+    tropo_files: Path | None = Field(
         None,
-        description="Directory with tropospheric correction NetCDF files (optional)"
+        description="Directory with tropospheric correction NetCDF files (optional)",
     )
-    reference_point: Optional[tuple[int, int]] = Field(
+    reference_point: tuple[int, int] | None = Field(
         None,
-        description="Reference point as [row, col] in pixel coordinates, None for automatic selection"
+        description=(
+            "Reference point as [row, col] in pixel coordinates, None for automatic"
+            " selection"
+        ),
     )
 
-    @field_validator('input_files', 'los_file', 'water_mask', mode='before')
+    @field_validator("input_files", "los_file", "water_mask", mode="before")
     @classmethod
     def convert_to_path(cls, v):
         """Convert string paths to Path objects."""
@@ -249,7 +260,7 @@ class CalibrationInputGroup(BaseModel):
             return Path(v)
         return v
 
-    @field_validator('tropo_files', mode='before')
+    @field_validator("tropo_files", mode="before")
     @classmethod
     def convert_optional_to_path(cls, v):
         """Convert optional string paths to Path objects."""
@@ -257,28 +268,33 @@ class CalibrationInputGroup(BaseModel):
             return Path(v)
         return None if v == "" else v
 
-    @field_validator('input_files', 'los_file', 'water_mask')
+    @field_validator("input_files", "los_file", "water_mask")
     @classmethod
     def validate_exists(cls, v, info):
         """Validate that required paths exist (skip for template placeholders)."""
         # Skip validation for template placeholder paths
-        if str(v).startswith('path/to/'):
+        if str(v).startswith("path/to/"):
             return v
         if not v.exists():
-            raise ValueError(f"{info.field_name} does not exist: {v}")
+            msg = f"{info.field_name} does not exist: {v}"
+            raise ValueError(msg)
         return v
 
-    @field_validator('tropo_files')
+    @field_validator("tropo_files")
     @classmethod
     def validate_optional_exists(cls, v):
-        """Validate that optional paths exist if provided (skip for template placeholders)."""
+        """Validate that optional paths exist if provided.
+
+        Skips validation for template placeholders.
+        """
         if v is None:
             return v
         # Skip validation for template placeholder paths
-        if str(v).startswith('path/to/'):
+        if str(v).startswith("path/to/"):
             return v
         if not v.exists():
-            raise ValueError(f"Path does not exist: {v}")
+            msg = f"Path does not exist: {v}"
+            raise ValueError(msg)
         return v
 
 
@@ -303,48 +319,66 @@ class DecompositionInputGroup(BaseModel):
         Path to descending static layers file (GeoTIFF with temporal coherence, etc.)
     reference_point : tuple[int, int], optional
         Reference point (row, col), None for auto-select
+
     """
 
     asc_displacement_files: Path = Field(
         ...,
-        description="Directory with ascending geometry displacement files in NetCDF format"
+        description=(
+            "Directory with ascending geometry displacement files in NetCDF format"
+        ),
     )
     desc_displacement_files: Path = Field(
         ...,
-        description="Directory with descending geometry displacement files in NetCDF format"
+        description=(
+            "Directory with descending geometry displacement files in NetCDF format"
+        ),
     )
     asc_los_file: Path = Field(
         ...,
-        description="Path to ascending LOS unit vector file (3-band GeoTIFF: east, north, up)"
+        description=(
+            "Path to ascending LOS unit vector file (3-band GeoTIFF: east, north, up)"
+        ),
     )
     desc_los_file: Path = Field(
         ...,
-        description="Path to descending LOS unit vector file (3-band GeoTIFF: east, north, up)"
+        description=(
+            "Path to descending LOS unit vector file (3-band GeoTIFF: east, north, up)"
+        ),
     )
     water_mask: Path = Field(
         ...,
-        description="Path to water mask file (GeoTIFF, 1=valid land, 0=invalid/water)"
+        description="Path to water mask file (GeoTIFF, 1=valid land, 0=invalid/water)",
     )
-    asc_static_layers: Optional[Path] = Field(
+    asc_static_layers: Path | None = Field(
         None,
-        description="Path to ascending static layers GeoTIFF (temporal coherence, amplitude dispersion, etc.)"
+        description=(
+            "Path to ascending static layers GeoTIFF (temporal coherence, amplitude"
+            " dispersion, etc.)"
+        ),
     )
-    desc_static_layers: Optional[Path] = Field(
+    desc_static_layers: Path | None = Field(
         None,
-        description="Path to descending static layers GeoTIFF (temporal coherence, amplitude dispersion, etc.)"
+        description=(
+            "Path to descending static layers GeoTIFF (temporal coherence, amplitude"
+            " dispersion, etc.)"
+        ),
     )
-    reference_point: Optional[tuple[int, int]] = Field(
+    reference_point: tuple[int, int] | None = Field(
         None,
-        description="Reference point as [row, col] in pixel coordinates, None for automatic selection"
+        description=(
+            "Reference point as [row, col] in pixel coordinates, None for automatic"
+            " selection"
+        ),
     )
 
     @field_validator(
-        'asc_displacement_files',
-        'desc_displacement_files',
-        'asc_los_file',
-        'desc_los_file',
-        'water_mask',
-        mode='before'
+        "asc_displacement_files",
+        "desc_displacement_files",
+        "asc_los_file",
+        "desc_los_file",
+        "water_mask",
+        mode="before",
     )
     @classmethod
     def convert_to_path(cls, v):
@@ -353,7 +387,7 @@ class DecompositionInputGroup(BaseModel):
             return Path(v)
         return v
 
-    @field_validator('asc_static_layers', 'desc_static_layers', mode='before')
+    @field_validator("asc_static_layers", "desc_static_layers", mode="before")
     @classmethod
     def convert_optional_to_path(cls, v):
         """Convert optional string paths to Path objects."""
@@ -362,33 +396,38 @@ class DecompositionInputGroup(BaseModel):
         return None if v == "" else v
 
     @field_validator(
-        'asc_displacement_files',
-        'desc_displacement_files',
-        'asc_los_file',
-        'desc_los_file',
-        'water_mask'
+        "asc_displacement_files",
+        "desc_displacement_files",
+        "asc_los_file",
+        "desc_los_file",
+        "water_mask",
     )
     @classmethod
     def validate_exists(cls, v, info):
         """Validate that required paths exist (skip for template placeholders)."""
         # Skip validation for template placeholder paths
-        if str(v).startswith('path/to/'):
+        if str(v).startswith("path/to/"):
             return v
         if not v.exists():
-            raise ValueError(f"{info.field_name} does not exist: {v}")
+            msg = f"{info.field_name} does not exist: {v}"
+            raise ValueError(msg)
         return v
 
-    @field_validator('asc_static_layers', 'desc_static_layers')
+    @field_validator("asc_static_layers", "desc_static_layers")
     @classmethod
     def validate_optional_exists(cls, v):
-        """Validate that optional paths exist if provided (skip for template placeholders)."""
+        """Validate that optional paths exist if provided.
+
+        Skips validation for template placeholders.
+        """
         if v is None:
             return v
         # Skip validation for template placeholder paths
-        if str(v).startswith('path/to/'):
+        if str(v).startswith("path/to/"):
             return v
         if not v.exists():
-            raise ValueError(f"Path does not exist: {v}")
+            msg = f"Path does not exist: {v}"
+            raise ValueError(msg)
         return v
 
 
@@ -409,26 +448,23 @@ class ProductPathGroup(BaseModel):
         Path to SAS output directory
     product_version : str
         Version of the product in <major>.<minor> format
+
     """
 
     product_path: Path = Field(
-        Path("output"),
-        description="Directory where products will be placed"
+        Path("output"), description="Directory where products will be placed"
     )
     scratch_path: Path = Field(
-        Path("scratch"),
-        description="Path to scratch directory for intermediate files"
+        Path("scratch"), description="Path to scratch directory for intermediate files"
     )
     sas_output_path: Path = Field(
-        Path("output"),
-        description="Path to SAS output directory"
+        Path("output"), description="Path to SAS output directory"
     )
     product_version: str = Field(
-        "1.0",
-        description="Version of the product in <major>.<minor> format"
+        "1.0", description="Version of the product in <major>.<minor> format"
     )
 
-    @field_validator('product_path', 'scratch_path', 'sas_output_path', mode='before')
+    @field_validator("product_path", "scratch_path", "sas_output_path", mode="before")
     @classmethod
     def convert_to_path(cls, v):
         """Convert string paths to Path objects."""
@@ -448,32 +484,34 @@ class WorkerSettings(BaseModel):
         Number of threads to use per worker (sets OMP_NUM_THREADS)
     block_shape : list[int]
         Size (rows, columns) of blocks of data to load at a time
+
     """
 
     gpu_enabled: bool = Field(
-        False,
-        description="Whether to use GPU for processing (if available)"
+        False, description="Whether to use GPU for processing (if available)"
     )
     threads_per_worker: int = Field(
         1,
         ge=1,
-        description="Number of threads to use per worker (sets OMP_NUM_THREADS)"
+        description="Number of threads to use per worker (sets OMP_NUM_THREADS)",
     )
     block_shape: list[int] = Field(
         [512, 512],
         min_length=2,
         max_length=2,
-        description="Size (rows, columns) of blocks of data to load at a time"
+        description="Size (rows, columns) of blocks of data to load at a time",
     )
 
-    @field_validator('block_shape')
+    @field_validator("block_shape")
     @classmethod
     def validate_block_shape(cls, v):
         """Validate block shape dimensions."""
         if len(v) != 2:
-            raise ValueError("block_shape must have exactly 2 elements")
+            msg = "block_shape must have exactly 2 elements"
+            raise ValueError(msg)
         if any(dim <= 0 for dim in v):
-            raise ValueError("block_shape dimensions must be positive")
+            msg = "block_shape dimensions must be positive"
+            raise ValueError(msg)
         return v
 
 
@@ -486,15 +524,14 @@ class PrimaryExecutable(BaseModel):
         Product type of the workflow
     workflow_name : str
         Name of the workflow to execute
+
     """
 
     product_type: Literal["VENTI_CALIBRATION", "VENTI_DECOMPOSITION"] = Field(
-        "VENTI_CALIBRATION",
-        description="Product type of the workflow"
+        "VENTI_CALIBRATION", description="Product type of the workflow"
     )
     workflow_name: Literal["calibrate", "decompose"] = Field(
-        "calibrate",
-        description="Name of the workflow to execute"
+        "calibrate", description="Name of the workflow to execute"
     )
 
 
@@ -508,33 +545,37 @@ class RunConfig(BaseModel):
     based on the workflow type.
     """
 
-    calibration_input_group: Optional[CalibrationInputGroup] = Field(
+    calibration_input_group: CalibrationInputGroup | None = Field(
         None,
-        description="Input files for calibration workflow (required if workflow_name is 'calibrate')"
+        description=(
+            "Input files for calibration workflow (required if workflow_name is"
+            " 'calibrate')"
+        ),
     )
-    decomposition_input_group: Optional[DecompositionInputGroup] = Field(
+    decomposition_input_group: DecompositionInputGroup | None = Field(
         None,
-        description="Input files for decomposition workflow (required if workflow_name is 'decompose')"
+        description=(
+            "Input files for decomposition workflow (required if workflow_name is"
+            " 'decompose')"
+        ),
     )
     product_path_group: ProductPathGroup = Field(
-        default_factory=ProductPathGroup,
-        description="Output product paths and version"
+        default_factory=ProductPathGroup, description="Output product paths and version"
     )
     primary_executable: PrimaryExecutable = Field(
         default_factory=PrimaryExecutable,
-        description="Primary executable configuration"
+        description="Primary executable configuration",
     )
     worker_settings: WorkerSettings = Field(
         default_factory=WorkerSettings,
-        description="Worker configuration for processing"
+        description="Worker configuration for processing",
     )
-    log_file: Optional[str] = Field(
-        None,
-        description="Path to output log file (in addition to logging to stderr)"
+    log_file: str | None = Field(
+        None, description="Path to output log file (in addition to logging to stderr)"
     )
     keep_paths_relative: bool = Field(
         False,
-        description="Don't resolve filepaths that are given as relative to be absolute"
+        description="Don't resolve filepaths that are given as relative to be absolute",
     )
 
     model_config = {
@@ -542,27 +583,29 @@ class RunConfig(BaseModel):
         "extra": "forbid",
     }
 
-    def model_post_init(self, __context) -> None:
+    def model_post_init(self, __context, /) -> None:
         """Validate that the correct input group is provided for the workflow type."""
         workflow_name = self.primary_executable.workflow_name
 
-        if workflow_name == 'calibrate':
-            if self.calibration_input_group is None:
-                raise ValueError(
-                    "calibration_input_group is required when workflow_name is 'calibrate'. "
-                    "Fill in the calibration_input_group section with your data paths."
-                )
-        elif workflow_name == 'decompose':
-            if self.decomposition_input_group is None:
-                raise ValueError(
-                    "decomposition_input_group is required when workflow_name is 'decompose'. "
-                    "Fill in the decomposition_input_group section with your data paths."
-                )
+        if workflow_name == "calibrate" and self.calibration_input_group is None:
+            msg = (
+                "calibration_input_group is required when workflow_name is"
+                " 'calibrate'. Fill in the calibration_input_group section with"
+                " your data paths."
+            )
+            raise ValueError(msg)
+        elif workflow_name == "decompose" and self.decomposition_input_group is None:
+            msg = (
+                "decomposition_input_group is required when workflow_name is"
+                " 'decompose'. Fill in the decomposition_input_group section with"
+                " your data paths."
+            )
+            raise ValueError(msg)
 
     @property
     def input_file_group(self):
         """Get the active input file group based on workflow type."""
-        if self.primary_executable.workflow_name == 'calibrate':
+        if self.primary_executable.workflow_name == "calibrate":
             return self.calibration_input_group
         else:
             return self.decomposition_input_group
@@ -572,9 +615,10 @@ class RunConfig(BaseModel):
         """Load run configuration from YAML file."""
         yaml_path = Path(yaml_path)
         if not yaml_path.exists():
-            raise FileNotFoundError(f"Run configuration file not found: {yaml_path}")
+            msg = f"Run configuration file not found: {yaml_path}"
+            raise FileNotFoundError(msg)
 
-        with open(yaml_path, 'r') as f:
+        with open(yaml_path) as f:
             data = yaml.safe_load(f)
 
         return cls(**data)
@@ -582,7 +626,7 @@ class RunConfig(BaseModel):
     def to_yaml(self, yaml_path: str | Path) -> None:
         """Save run configuration to YAML file."""
         yaml_path = Path(yaml_path)
-        data = self.model_dump(mode='python')
+        data = self.model_dump(mode="python")
 
         # Convert Path objects to strings for YAML serialization
         def convert_paths(obj):
@@ -597,13 +641,14 @@ class RunConfig(BaseModel):
         data = convert_paths(data)
 
         yaml_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(yaml_path, 'w') as f:
+        with open(yaml_path, "w") as f:
             yaml.dump(data, f, default_flow_style=False, sort_keys=False)
 
 
 # ============================================================================
 # Combined Configuration
 # ============================================================================
+
 
 class VentiConfig(BaseModel):
     """Combined Venti configuration.
@@ -633,6 +678,7 @@ class VentiConfig(BaseModel):
         -------
         VentiConfig
             Combined configuration
+
         """
         run_config = RunConfig.from_yaml(runconfig_path)
         algorithm_params = AlgorithmParameters.from_yaml(algorithm_params_path)
@@ -699,9 +745,10 @@ class VentiConfig(BaseModel):
 # Helper Functions
 # ============================================================================
 
+
 def load_config(
     runconfig_path: str | Path,
-    algorithm_params_path: Optional[str | Path] = None,
+    algorithm_params_path: str | Path | None = None,
 ) -> VentiConfig:
     """Load Venti configuration from YAML files.
 
@@ -717,6 +764,7 @@ def load_config(
     -------
     VentiConfig
         Combined configuration
+
     """
     runconfig_path = Path(runconfig_path)
 
@@ -731,7 +779,9 @@ def load_config(
     return VentiConfig.from_yaml_files(runconfig_path, algorithm_params_path)
 
 
-def _write_yaml_with_comments(data: dict, model: type[BaseModel], output_path: Path) -> None:
+def _write_yaml_with_comments(
+    data: dict, model: type[BaseModel], output_path: Path
+) -> None:
     """Write YAML with inline comments from Field descriptions.
 
     Parameters
@@ -742,15 +792,19 @@ def _write_yaml_with_comments(data: dict, model: type[BaseModel], output_path: P
         Pydantic model class to extract descriptions from
     output_path : Path
         Path to write YAML file
+
     """
-    def write_dict_with_comments(obj: dict, model_class: type[BaseModel], indent: int = 0) -> str:
+
+    def write_dict_with_comments(
+        obj: dict, model_class: type[BaseModel], indent: int = 0
+    ) -> str:
         """Recursively write dict with comments."""
         lines = []
         indent_str = "  " * indent
 
         for key, value in obj.items():
             # Get field description if available
-            if hasattr(model_class, 'model_fields') and key in model_class.model_fields:
+            if hasattr(model_class, "model_fields") and key in model_class.model_fields:
                 field_info = model_class.model_fields[key]
                 description = field_info.description
                 if description:
@@ -761,26 +815,39 @@ def _write_yaml_with_comments(data: dict, model: type[BaseModel], output_path: P
             if isinstance(value, dict):
                 lines.append(f"{indent_str}{key}:")
                 # Get nested model class if available
-                if hasattr(model_class, 'model_fields') and key in model_class.model_fields:
+                if (
+                    hasattr(model_class, "model_fields")
+                    and key in model_class.model_fields
+                ):
                     field_info = model_class.model_fields[key]
                     # Get the actual type (handle Optional, etc.)
                     field_type = field_info.annotation
-                    if hasattr(field_type, '__origin__'):  # Handle Optional, Union
-                        args = getattr(field_type, '__args__', ())
+                    if hasattr(field_type, "__origin__"):  # Handle Optional, Union
+                        args = getattr(field_type, "__args__", ())
                         field_type = args[0] if args else field_type
-                    if isinstance(field_type, type) and issubclass(field_type, BaseModel):
-                        lines.append(write_dict_with_comments(value, field_type, indent + 1))
+                    if isinstance(field_type, type) and issubclass(
+                        field_type, BaseModel
+                    ):
+                        lines.append(
+                            write_dict_with_comments(value, field_type, indent + 1)
+                        )
                     else:
-                        lines.append(write_dict_with_comments(value, model_class, indent + 1))
+                        lines.append(
+                            write_dict_with_comments(value, model_class, indent + 1)
+                        )
                 else:
-                    lines.append(write_dict_with_comments(value, model_class, indent + 1))
+                    lines.append(
+                        write_dict_with_comments(value, model_class, indent + 1)
+                    )
             # Handle lists
             elif isinstance(value, list):
                 lines.append(f"{indent_str}{key}:")
                 for item in value:
                     if isinstance(item, dict):
                         lines.append(f"{indent_str}  -")
-                        lines.append(write_dict_with_comments(item, model_class, indent + 2))
+                        lines.append(
+                            write_dict_with_comments(item, model_class, indent + 2)
+                        )
                     else:
                         lines.append(f"{indent_str}  - {item}")
             # Handle None
@@ -788,23 +855,23 @@ def _write_yaml_with_comments(data: dict, model: type[BaseModel], output_path: P
                 lines.append(f"{indent_str}{key}: null")
             # Handle strings with special characters
             elif isinstance(value, str):
-                if any(c in value for c in [':', '#', '@', '`']):
+                if any(c in value for c in [":", "#", "@", "`"]):
                     lines.append(f"{indent_str}{key}: '{value}'")
                 else:
                     lines.append(f"{indent_str}{key}: {value}")
             # Handle Path objects
             elif isinstance(value, Path):
-                lines.append(f"{indent_str}{key}: {str(value)}")
+                lines.append(f"{indent_str}{key}: {value!s}")
             # Handle everything else
             else:
                 lines.append(f"{indent_str}{key}: {value}")
 
-        return '\n'.join(lines)
+        return "\n".join(lines)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     content = write_dict_with_comments(data, model)
 
-    with open(output_path, 'w') as f:
+    with open(output_path, "w") as f:
         f.write(content)
 
 
@@ -827,6 +894,7 @@ def create_config_templates(output_dir: str | Path = ".") -> tuple[Path, Path]:
     -------
     tuple of Path
         (runconfig_path, algorithm_params_path)
+
     """
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -863,8 +931,8 @@ def create_config_templates(output_dir: str | Path = ".") -> tuple[Path, Path]:
     algorithm_params = AlgorithmParameters()
 
     # Convert configs to dicts
-    config_data = config.model_dump(mode='python')
-    algorithm_params_data = algorithm_params.model_dump(mode='python')
+    config_data = config.model_dump(mode="python")
+    algorithm_params_data = algorithm_params.model_dump(mode="python")
 
     # Convert Path objects to strings
     def convert_paths(obj):
@@ -881,7 +949,9 @@ def create_config_templates(output_dir: str | Path = ".") -> tuple[Path, Path]:
 
     # Write YAML files with comments
     _write_yaml_with_comments(config_data, RunConfig, runconfig_path)
-    _write_yaml_with_comments(algorithm_params_data, AlgorithmParameters, algorithm_params_path)
+    _write_yaml_with_comments(
+        algorithm_params_data, AlgorithmParameters, algorithm_params_path
+    )
 
     return runconfig_path, algorithm_params_path
 
@@ -892,4 +962,3 @@ def create_config_templates(output_dir: str | Path = ".") -> tuple[Path, Path]:
 
 # Type alias for cleaner imports
 WorkflowConfig = VentiConfig
-

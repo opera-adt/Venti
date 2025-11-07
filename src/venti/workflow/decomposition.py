@@ -6,14 +6,20 @@ the LOS-to-ENU (Line-of-Sight to East-North-Up) decomposition process.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING
+
 import numpy as np
-import logging
 from tqdm import tqdm
 
 from .config import WorkflowConfig
+
+if TYPE_CHECKING:
+    from ..io.read import RasterReader
+    from ..io.write import RasterWriter
+    from ..spatial.processor import SpatialProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +38,7 @@ class DecompositionState:
         Number of files that failed
     output_files : list[Path]
         List of output file paths
+
     """
 
     n_files_total: int = 0
@@ -51,7 +58,11 @@ class DecompositionState:
         """Calculate success rate."""
         if self.n_files_processed == 0:
             return 0.0
-        return 100.0 * (self.n_files_processed - self.n_files_failed) / self.n_files_processed
+        return (
+            100.0
+            * (self.n_files_processed - self.n_files_failed)
+            / self.n_files_processed
+        )
 
 
 @dataclass
@@ -74,12 +85,13 @@ class DecompositionWorkflow:
         Spatial processor for decomposition operations
     state : DecompositionState
         Workflow state tracking
+
     """
 
     config: WorkflowConfig
-    io_reader: Optional[object] = field(default=None, init=False)
-    io_writer: Optional[object] = field(default=None, init=False)
-    spatial_processor: Optional[object] = field(default=None, init=False)
+    io_reader: RasterReader | None = field(default=None, init=False)
+    io_writer: RasterWriter | None = field(default=None, init=False)
+    spatial_processor: SpatialProcessor | None = field(default=None, init=False)
     state: DecompositionState = field(default_factory=DecompositionState, init=False)
 
     def __post_init__(self):
@@ -111,7 +123,10 @@ class DecompositionWorkflow:
         dict
             Dictionary with 'ascending' and 'descending' LOS vectors
             Each contains (los_east, los_north, los_up) arrays
+
         """
+        assert self.io_reader is not None, "io_reader not initialized"
+
         logger.info("Loading LOS unit vectors...")
 
         los_vectors = {}
@@ -123,16 +138,17 @@ class DecompositionWorkflow:
             los_north = los_data.data[1]
             los_up = los_data.data[2]
         else:
-            raise ValueError("LOS file must be 3-band (east, north, up)")
+            msg = "LOS file must be 3-band (east, north, up)"
+            raise ValueError(msg)
 
         # TODO: Determine geometry type (ascending/descending) from metadata
         # For now, placeholder assumes ascending
-        los_vectors['primary'] = (los_east, los_north, los_up)
+        los_vectors["primary"] = (los_east, los_north, los_up)
 
         logger.info("LOS vectors loaded")
         return los_vectors
 
-    def load_displacement_pairs(self) -> list[tuple[Path, Path]]:
+    def load_displacement_pairs(self) -> list[tuple[Path, Path | None]]:
         """Load and match displacement files from multiple geometries.
 
         Returns
@@ -146,6 +162,7 @@ class DecompositionWorkflow:
         1. Find displacement files from ascending and descending directories
         2. Match files by acquisition date
         3. Return paired files for decomposition
+
         """
         logger.info("Loading displacement file pairs...")
 
@@ -155,7 +172,7 @@ class DecompositionWorkflow:
 
         # TODO: Implement proper pairing logic for ascending/descending
         # For now, create dummy pairs
-        pairs = [(f, None) for f in disp_files]
+        pairs: list[tuple[Path, Path | None]] = [(f, None) for f in disp_files]
 
         logger.info(f"Found {len(pairs)} displacement file pairs")
         return pairs
@@ -163,7 +180,7 @@ class DecompositionWorkflow:
     def decompose_to_enu(
         self,
         los_asc: np.ndarray,
-        los_desc: np.ndarray,
+        _los_desc: np.ndarray,
         los_vectors_asc: tuple[np.ndarray, np.ndarray, np.ndarray],
         los_vectors_desc: tuple[np.ndarray, np.ndarray, np.ndarray],
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -193,6 +210,7 @@ class DecompositionWorkflow:
         2. Apply proper weighting based on geometry and uncertainties
         3. Handle rank-deficient cases (e.g., only ascending or descending)
         4. Compute uncertainties for output components
+
         """
         logger.debug("Performing LOS-to-ENU decomposition...")
 
@@ -217,9 +235,9 @@ class DecompositionWorkflow:
     def process_displacement_pair(
         self,
         asc_file: Path,
-        desc_file: Optional[Path],
-        los_vectors: dict[str, tuple],
-    ) -> Optional[tuple[Path, Path, Path]]:
+        _desc_file: Path | None,
+        _los_vectors: dict[str, tuple],
+    ) -> tuple[Path, Path, Path] | None:
         """Process a pair of displacement files to produce ENU components.
 
         Parameters
@@ -244,12 +262,16 @@ class DecompositionWorkflow:
         3. Perform decomposition to ENU
         4. Write three output files (East, North, Up components)
         5. Include proper error handling and quality metrics
+
         """
+        assert self.io_reader is not None, "io_reader not initialized"
+        assert self.io_writer is not None, "io_writer not initialized"
+
         logger.debug(f"Processing {asc_file.name}")
 
         try:
             # Read displacement data
-            netcdf_data = self.io_reader.read_netcdf(asc_file, variable='displacement')
+            netcdf_data = self.io_reader.read_netcdf(asc_file, variable="displacement")
             disp = netcdf_data.data
 
             # Placeholder: Create dummy ENU outputs
@@ -290,12 +312,12 @@ class DecompositionWorkflow:
                 descriptions=["Up displacement component"],
             )
 
+        except Exception:
+            logger.exception(f"Failed to process {asc_file.name}")
+            return None
+        else:
             logger.debug(f"Saved: {east_file.name}, {north_file.name}, {up_file.name}")
             return east_file, north_file, up_file
-
-        except Exception as e:
-            logger.error(f"Failed to process {asc_file.name}: {e}")
-            return None
 
     def run(self) -> DecompositionState:
         """Run the complete decomposition workflow.
@@ -316,11 +338,14 @@ class DecompositionWorkflow:
            - Save East, North, Up components
         4. Generate quality metrics and uncertainty estimates
         5. Optionally create visualization products
+
         """
-        logger.info("="*60)
+        logger.info("=" * 60)
         logger.info("Starting Venti Decomposition Workflow")
-        logger.info("="*60)
-        logger.warning("PLACEHOLDER IMPLEMENTATION - Full decomposition not yet implemented!")
+        logger.info("=" * 60)
+        logger.warning(
+            "PLACEHOLDER IMPLEMENTATION - Full decomposition not yet implemented!"
+        )
 
         # Load LOS vectors
         los_vectors = self.load_los_vectors()
@@ -344,9 +369,9 @@ class DecompositionWorkflow:
             self.state.n_files_processed += 1
 
         # Summary
-        logger.info("="*60)
+        logger.info("=" * 60)
         logger.info("Decomposition Workflow Complete!")
-        logger.info("="*60)
+        logger.info("=" * 60)
         logger.info(f"Total pairs: {self.state.n_files_total}")
         logger.info(f"Processed: {self.state.n_files_processed}")
         logger.info(f"Failed: {self.state.n_files_failed}")
@@ -368,6 +393,7 @@ def run_decomposition_workflow(config: WorkflowConfig) -> DecompositionState:
     -------
     DecompositionState
         Final workflow state
+
     """
     workflow = DecompositionWorkflow(config=config)
     return workflow.run()

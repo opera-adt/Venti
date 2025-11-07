@@ -6,14 +6,21 @@ the entire calibration process using dataclasses and object composition.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING
+
 import numpy as np
-import logging
 from tqdm import tqdm
 
 from .config import WorkflowConfig
+
+if TYPE_CHECKING:
+    from ..gnss.reference import GNSSReference
+    from ..io.read import RasterReader
+    from ..io.write import RasterWriter
+    from ..spatial.processor import SpatialProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +39,7 @@ class CalibrationState:
         Number of files that failed
     output_files : list[Path]
         List of output file paths
+
     """
 
     n_files_total: int = 0
@@ -51,7 +59,11 @@ class CalibrationState:
         """Calculate success rate."""
         if self.n_files_processed == 0:
             return 0.0
-        return 100.0 * (self.n_files_processed - self.n_files_failed) / self.n_files_processed
+        return (
+            100.0
+            * (self.n_files_processed - self.n_files_failed)
+            / self.n_files_processed
+        )
 
 
 @dataclass
@@ -75,22 +87,23 @@ class CalibrationWorkflow:
         Spatial processor
     state : CalibrationState
         Workflow state tracking
+
     """
 
     config: WorkflowConfig
-    gnss_manager: Optional[object] = field(default=None, init=False)
-    io_reader: Optional[object] = field(default=None, init=False)
-    io_writer: Optional[object] = field(default=None, init=False)
-    spatial_processor: Optional[object] = field(default=None, init=False)
+    gnss_manager: GNSSReference | None = field(default=None, init=False)
+    io_reader: RasterReader | None = field(default=None, init=False)
+    io_writer: RasterWriter | None = field(default=None, init=False)
+    spatial_processor: SpatialProcessor | None = field(default=None, init=False)
     state: CalibrationState = field(default_factory=CalibrationState, init=False)
 
     def __post_init__(self):
         """Initialize workflow components."""
-        from ..gnss.reference import GNSSReference
         from ..io.read import RasterReader
         from ..io.write import RasterWriter
         from ..spatial.processor import SpatialProcessor
-        ## TODO: the imports above are based on the current implementation 
+
+        ## TODO: the imports above are based on the current implementation
         # transferred from calibrate_timeseries.py. They might change if we use
         # xarray spatial module and geepers for GNSS
         # same for functions imported from utils, mainly downsample and upsample
@@ -120,11 +133,17 @@ class CalibrationWorkflow:
         -------
         int
             Number of GNSS stations downloaded
+
         """
+        from ..gnss.reference import GNSSReference
+
+        assert self.io_reader is not None, "io_reader not initialized"
+
         # Get bounds from first displacement file
         disp_files = sorted(self.config.input_options.input_files.glob("*.nc"))
         if not disp_files:
-            raise FileNotFoundError(f"No NetCDF files in {self.config.input_options.input_files}")
+            msg = f"No NetCDF files in {self.config.input_options.input_files}"
+            raise FileNotFoundError(msg)
 
         bounds = self.io_reader.get_bounds(disp_files[0], as_latlon=False)
 
@@ -132,11 +151,12 @@ class CalibrationWorkflow:
         netcdf_data = self.io_reader.read_netcdf(disp_files[0])
         utm_crs = netcdf_data.crs
 
-        if hasattr(utm_crs, 'to_epsg'):
+        if hasattr(utm_crs, "to_epsg"):
             utm_epsg = utm_crs.to_epsg()
         else:
             import re
-            match = re.search(r'EPSG:(\d+)', str(utm_crs))
+
+            match = re.search(r"EPSG:(\d+)", str(utm_crs))
             utm_epsg = int(match.group(1)) if match else None
 
         # Initialize GNSS reference
@@ -152,7 +172,8 @@ class CalibrationWorkflow:
         n_stations = self.gnss_manager.download_stations()
 
         if n_stations == 0:
-            raise ValueError("No GNSS stations found in area")
+            msg = "No GNSS stations found in area"
+            raise ValueError(msg)
 
         logger.info(f"GNSS setup complete: {n_stations} stations")
         return n_stations
@@ -164,7 +185,10 @@ class CalibrationWorkflow:
         -------
         tuple
             (los_east, los_north, los_up, mask)
+
         """
+        assert self.io_reader is not None, "io_reader not initialized"
+
         logger.info("Loading LOS unit vectors and mask...")
 
         # Load LOS
@@ -174,7 +198,8 @@ class CalibrationWorkflow:
             los_north = los_data.data[1]
             los_up = los_data.data[2]
         else:
-            raise ValueError("LOS file must be 3-band (east, north, up)")
+            msg = "LOS file must be 3-band (east, north, up)"
+            raise ValueError(msg)
 
         # Load mask
         mask_data = self.io_reader.read_geotiff(self.config.input_options.water_mask)
@@ -195,9 +220,13 @@ class CalibrationWorkflow:
         -------
         tuple
             (row, col) reference point
+
         """
         if self.config.input_options.reference_point is not None:
-            logger.info(f"Using configured reference point: {self.config.input_options.reference_point}")
+            logger.info(
+                "Using configured reference point:"
+                f" {self.config.input_options.reference_point}"
+            )
             return self.config.input_options.reference_point
 
         # Compute average coherence for auto-selection
@@ -207,17 +236,19 @@ class CalibrationWorkflow:
         coherence_file = compute_average_temporal_coherence(
             disp_files,
             self.config.input_options.work_directory,
-            variable='temporal_coherence',
+            variable="temporal_coherence",
         )
 
         try:
             from opera_utils.disp import rebase_reference
+
             ref_point = rebase_reference.find_reference_point(coherence_file)
-            logger.info(f"Auto-selected reference point: {ref_point}")
-            return ref_point
         except Exception as e:
             logger.warning(f"Auto-selection failed: {e}, using center")
             return (mask.shape[0] // 2, mask.shape[1] // 2)
+        else:
+            logger.info(f"Auto-selected reference point: {ref_point}")
+            return ref_point
 
     def compute_gnss_reference(
         self,
@@ -225,8 +256,8 @@ class CalibrationWorkflow:
         los_north: np.ndarray,
         los_up: np.ndarray,
         disp_file: Path,
-        ref_date: Optional[float] = None,
-        sec_date: Optional[float] = None,
+        ref_date: float | None = None,
+        sec_date: float | None = None,
     ) -> np.ndarray:
         """Compute GNSS reference in LOS.
 
@@ -249,16 +280,22 @@ class CalibrationWorkflow:
         -------
         np.ndarray
             GNSS LOS displacement/velocity
+
         """
+        assert self.gnss_manager is not None, "gnss_manager not initialized"
+
         if self.config.grid_settings.grid_type == "constant":
             # Use velocities
-            if not hasattr(self, '_gnss_velocity'):
-                logger.info(f"Computing GNSS velocities from {self.config.grid_settings.starting_year}")
+            if not hasattr(self, "_gnss_velocity"):
+                logger.info(
+                    "Computing GNSS velocities from"
+                    f" {self.config.grid_settings.starting_year}"
+                )
                 gnss_velocities = self.gnss_manager.compute_velocities(
                     start_year=self.config.grid_settings.starting_year
                 )
                 gnss_los = gnss_velocities.project_to_los(
-                    los_east, los_north, los_up, disp_file, method='rbf'
+                    los_east, los_north, los_up, disp_file, method="rbf"
                 )
                 self._gnss_velocity = gnss_los
 
@@ -272,11 +309,12 @@ class CalibrationWorkflow:
         else:
             # Compute epoch-specific displacement
             if ref_date is None or sec_date is None:
-                raise ValueError("ref_date and sec_date required for variable grid type")
+                msg = "ref_date and sec_date required for variable grid type"
+                raise ValueError(msg)
 
             gnss_disp = self.gnss_manager.compute_displacement(ref_date, sec_date)
             return gnss_disp.project_to_los(
-                los_east, los_north, los_up, disp_file, method='rbf'
+                los_east, los_north, los_up, disp_file, method="rbf"
             )
 
     def process_displacement_file(
@@ -290,8 +328,8 @@ class CalibrationWorkflow:
         window_size_x: int,
         window_size_y: int,
         bounds: tuple,
-        tropo_file: Optional[Path] = None,
-    ) -> Optional[Path]:
+        tropo_file: Path | None = None,
+    ) -> Path | None:
         """Process a single displacement file.
 
         Parameters
@@ -321,9 +359,14 @@ class CalibrationWorkflow:
         -------
         Path or None
             Output file path if successful
+
         """
-        from .utils import get_file_dates, downsample_array, upsample_array
         from ..unwrap import correct_region_offset
+        from .utils import downsample_array, get_file_dates, upsample_array
+
+        assert self.io_reader is not None, "io_reader not initialized"
+        assert self.io_writer is not None, "io_writer not initialized"
+        assert self.spatial_processor is not None, "spatial_processor not initialized"
 
         try:
             # Extract dates
@@ -335,7 +378,7 @@ class CalibrationWorkflow:
         logger.debug(f"Processing {disp_file.name}")
 
         # Read displacement
-        netcdf_data = self.io_reader.read_netcdf(disp_file, variable='displacement')
+        netcdf_data = self.io_reader.read_netcdf(disp_file, variable="displacement")
         disp = netcdf_data.data * 1000  # Convert to mm
         refy, refx = ref_point
         disp -= disp[refy, refx]
@@ -368,11 +411,21 @@ class CalibrationWorkflow:
         # Downsample if requested
         original_shape = disp.shape
         if self.config.grid_settings.downsample_factor > 1:
-            logger.debug(f"Downsampling by factor {self.config.grid_settings.downsample_factor}")
-            disp_ds = downsample_array(disp, self.config.grid_settings.downsample_factor)
-            gnss_los_ds = downsample_array(gnss_los, self.config.grid_settings.downsample_factor)
-            win_x_ds = max(1, window_size_x // self.config.grid_settings.downsample_factor)
-            win_y_ds = max(1, window_size_y // self.config.grid_settings.downsample_factor)
+            logger.debug(
+                f"Downsampling by factor {self.config.grid_settings.downsample_factor}"
+            )
+            disp_ds = downsample_array(
+                disp, self.config.grid_settings.downsample_factor
+            )
+            gnss_los_ds = downsample_array(
+                gnss_los, self.config.grid_settings.downsample_factor
+            )
+            win_x_ds = max(
+                1, window_size_x // self.config.grid_settings.downsample_factor
+            )
+            win_y_ds = max(
+                1, window_size_y // self.config.grid_settings.downsample_factor
+            )
         else:
             disp_ds = disp
             gnss_los_ds = gnss_los
@@ -406,16 +459,23 @@ class CalibrationWorkflow:
         corrected = corrected / 1000.0
 
         # Build output filename
-        suffix = f"_corrected_{self.config.grid_settings.grid_type}_{self.config.grid_settings.reference_frame.lower()}"
+        grid_type = self.config.grid_settings.grid_type
+        ref_frame = self.config.grid_settings.reference_frame.lower()
+        suffix = f"_corrected_{grid_type}_{ref_frame}"
         if tropo_file is not None:
             suffix += "_tropo"
         if self.config.grid_settings.downsample_factor > 1:
             suffix += f"_downsample{self.config.grid_settings.downsample_factor}"
 
-        output_file = self.config.input_options.work_directory / f"{disp_file.stem}{suffix}.tif"
+        output_file = (
+            self.config.input_options.work_directory / f"{disp_file.stem}{suffix}.tif"
+        )
 
         # Save
-        description = f"Calibrated displacement ({self.config.grid_settings.grid_type} GNSS model)"
+        description = (
+            f"Calibrated displacement ({self.config.grid_settings.grid_type} GNSS"
+            " model)"
+        )
         if tropo_file is not None:
             description += " with tropospheric correction"
 
@@ -437,10 +497,13 @@ class CalibrationWorkflow:
         -------
         CalibrationState
             Final workflow state
+
         """
-        logger.info("="*60)
+        assert self.io_reader is not None, "io_reader not initialized"
+
+        logger.info("=" * 60)
         logger.info("Starting Venti Calibration Workflow")
-        logger.info("="*60)
+        logger.info("=" * 60)
 
         # Setup GNSS
         self.setup_gnss()
@@ -461,9 +524,15 @@ class CalibrationWorkflow:
         from .utils import match_correction_to_displacement
 
         if self.config.input_options.tropo_files is not None:
-            tropo_files = sorted(self.config.input_options.tropo_files.glob("tropo_corr*.tif"))
-            self.matched_files = match_correction_to_displacement(tropo_files, disp_files)
-            logger.info(f"Matched {len(self.matched_files)} tropospheric correction files")
+            tropo_files = sorted(
+                self.config.input_options.tropo_files.glob("tropo_corr*.tif")
+            )
+            self.matched_files = match_correction_to_displacement(
+                tropo_files, disp_files
+            )
+            logger.info(
+                f"Matched {len(self.matched_files)} tropospheric correction files"
+            )
         else:
             self.matched_files = match_correction_to_displacement(None, disp_files)
 
@@ -504,9 +573,9 @@ class CalibrationWorkflow:
             self.state.n_files_processed += 1
 
         # Summary
-        logger.info("="*60)
+        logger.info("=" * 60)
         logger.info("Calibration Workflow Complete!")
-        logger.info("="*60)
+        logger.info("=" * 60)
         logger.info(f"Total files: {self.state.n_files_total}")
         logger.info(f"Processed: {self.state.n_files_processed}")
         logger.info(f"Failed: {self.state.n_files_failed}")
@@ -528,6 +597,7 @@ def run_calibration_workflow(config: WorkflowConfig) -> CalibrationState:
     -------
     CalibrationState
         Final workflow state
+
     """
     workflow = CalibrationWorkflow(config=config)
     return workflow.run()

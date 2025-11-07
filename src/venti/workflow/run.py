@@ -12,27 +12,27 @@ API while using the object-oriented implementation under the hood.
 from __future__ import annotations
 
 import logging
-from pathlib import Path
-from typing import Optional, Literal, Union
 from enum import Enum
+from pathlib import Path
+from typing import Literal, cast
 
-from .config import VentiConfig, RunConfig, AlgorithmParameters, WorkflowConfig
-from .calibration import CalibrationWorkflow, CalibrationState
-from .decomposition import DecompositionWorkflow, DecompositionState
+from .calibration import CalibrationState, CalibrationWorkflow
+from .config import AlgorithmParameters, RunConfig, VentiConfig, WorkflowConfig
+from .decomposition import DecompositionState, DecompositionWorkflow
 
 logger = logging.getLogger(__name__)
 
 
 class WorkflowType(str, Enum):
     """Available workflow types."""
+
     calibrate = "calibrate"
     decompose = "decompose"
 
 
 def run_workflow(
-    config: WorkflowConfig,
-    workflow_type: WorkflowType = WorkflowType.calibrate
-) -> Union[CalibrationState, DecompositionState]:
+    config: WorkflowConfig, workflow_type: WorkflowType = WorkflowType.calibrate
+) -> CalibrationState | DecompositionState:
     """Run a workflow using provided configuration.
 
     Parameters
@@ -61,11 +61,13 @@ def run_workflow(
 
         config = WorkflowConfig.from_yaml('config.yaml')
         state = run_workflow(config, WorkflowType.decompose)
+
     """
     # Set up worker settings
     import os
+
     if config.worker_settings.threads_per_worker > 1:
-        os.environ['OMP_NUM_THREADS'] = str(config.worker_settings.threads_per_worker)
+        os.environ["OMP_NUM_THREADS"] = str(config.worker_settings.threads_per_worker)
 
     # Set up logging if log_file is specified
     if config.log_file:
@@ -75,13 +77,14 @@ def run_workflow(
 
     # Dispatch to appropriate workflow
     if workflow_type == WorkflowType.calibrate:
-        workflow = CalibrationWorkflow(config=config)
-        return workflow.run()
+        calib_workflow = CalibrationWorkflow(config=config)
+        return calib_workflow.run()
     elif workflow_type == WorkflowType.decompose:
-        workflow = DecompositionWorkflow(config=config)
-        return workflow.run()
+        decomp_workflow = DecompositionWorkflow(config=config)
+        return decomp_workflow.run()
     else:
-        raise ValueError(f"Unknown workflow type: {workflow_type}")
+        msg = f"Unknown workflow type: {workflow_type}"
+        raise ValueError(msg)
 
 
 def calibrate_timeseries(
@@ -89,8 +92,8 @@ def calibrate_timeseries(
     los_file: Path,
     mask_file: Path,
     output_dir: Path,
-    correction_dir: Optional[Path] = None,
-    reference_point: Optional[tuple[int, int]] = None,
+    correction_dir: Path | None = None,
+    reference_point: tuple[int, int] | None = None,
     grid_type: Literal["constant", "variable"] = "constant",
     downsample_factor: int = 1,
     window_size_meters: float = 30000,
@@ -98,12 +101,11 @@ def calibrate_timeseries(
     reference_frame: str = "IGS20",
     start_year: float = 2014.0,
     gpu_enabled: bool = False,
-    block_shape: list[int] = None,
+    block_shape: list[int] | None = None,
     unwrap_error_correction: bool = True,
     keep_paths_relative: bool = False,
 ) -> CalibrationState:
-    """
-    Calibrate InSAR displacement timeseries using GNSS reference data.
+    """Calibrate InSAR displacement timeseries using GNSS reference data.
 
     This function provides a backward-compatible functional API that wraps
     the CalibrationWorkflow class. For new code, consider using WorkflowConfig
@@ -124,7 +126,8 @@ def calibrate_timeseries(
     reference_point : tuple of int, optional
         Reference point (row, col), by default None (auto-select)
     grid_type : str, optional
-        GNSS grid type: "constant" (velocity) or "variable" (epoch-specific), by default "constant"
+        GNSS grid type: "constant" (velocity) or "variable" (epoch-specific),
+        by default "constant"
     downsample_factor : int, optional
         Downsampling factor for faster processing, by default 1 (no downsampling)
     window_size_meters : float, optional
@@ -142,7 +145,8 @@ def calibrate_timeseries(
     unwrap_error_correction : bool, optional
         Whether to correct islands for unwrap errors, by default True
     keep_paths_relative : bool, optional
-        Don't resolve filepaths that are given as relative to be absolute, by default False
+        Don't resolve filepaths that are given as relative to be absolute,
+        by default False
 
     Returns
     -------
@@ -179,13 +183,14 @@ def calibrate_timeseries(
     - _corrected_variable_igs20: Epoch-specific model
     - _corrected_*_tropo: With tropospheric corrections
     - _corrected_*_downsample{N}: With downsampling
+
     """
     from .config import (
         CalibrationInputGroup,
+        CalibrationOptions,
+        PrimaryExecutable,
         ProductPathGroup,
         WorkerSettings,
-        PrimaryExecutable,
-        CalibrationOptions,
     )
 
     # Set default block_shape if not provided
@@ -237,7 +242,9 @@ def calibrate_timeseries(
     )
 
     # Run workflow using the CalibrationWorkflow class
-    return run_workflow(config, workflow_type=WorkflowType.calibrate)
+    return cast(
+        CalibrationState, run_workflow(config, workflow_type=WorkflowType.calibrate)
+    )
 
 
 def decompose_timeseries(
@@ -245,15 +252,14 @@ def decompose_timeseries(
     los_file: Path,
     mask_file: Path,
     output_dir: Path,
-    asc_dir: Optional[Path] = None,
-    desc_dir: Optional[Path] = None,
-    reference_point: Optional[tuple[int, int]] = None,
+    asc_dir: Path | None = None,
+    desc_dir: Path | None = None,
+    reference_point: tuple[int, int] | None = None,
     gpu_enabled: bool = False,
-    block_shape: list[int] = None,
+    block_shape: list[int] | None = None,
     keep_paths_relative: bool = False,
 ) -> DecompositionState:
-    """
-    Decompose InSAR LOS displacement to East-North-Up components.
+    """Decompose InSAR LOS displacement to East-North-Up components.
 
     This function provides a backward-compatible functional API that wraps
     the DecompositionWorkflow class. For new code, consider using WorkflowConfig
@@ -280,7 +286,8 @@ def decompose_timeseries(
     block_shape : list of int, optional
         Size (rows, columns) of blocks of data to load at a time, by default [512, 512]
     keep_paths_relative : bool, optional
-        Don't resolve filepaths that are given as relative to be absolute, by default False
+        Don't resolve filepaths that are given as relative to be absolute,
+        by default False
 
     Returns
     -------
@@ -316,12 +323,13 @@ def decompose_timeseries(
     - Proper least-squares inversion
     - Uncertainty quantification
     - Quality metrics
+
     """
     from .config import (
         DecompositionInputGroup,
+        PrimaryExecutable,
         ProductPathGroup,
         WorkerSettings,
-        PrimaryExecutable,
     )
 
     # Set default block_shape if not provided
@@ -366,7 +374,9 @@ def decompose_timeseries(
     )
 
     # Run workflow using the DecompositionWorkflow class
-    return run_workflow(config, workflow_type=WorkflowType.decompose)
+    return cast(
+        DecompositionState, run_workflow(config, workflow_type=WorkflowType.decompose)
+    )
 
 
 def calibrate_command(config_file: str) -> None:
@@ -376,6 +386,7 @@ def calibrate_command(config_file: str) -> None:
     ----------
     config_file : str
         Path to YAML configuration file
+
     """
     from .config import load_config
 
@@ -391,6 +402,7 @@ def decompose_command(config_file: str) -> None:
     ----------
     config_file : str
         Path to YAML configuration file
+
     """
     from .config import load_config
 
@@ -403,7 +415,9 @@ if __name__ == "__main__":
     import tyro
 
     # Support subcommands: calibrate or decompose
-    tyro.extras.subcommand_cli_from_dict({
-        WorkflowType.calibrate: calibrate_timeseries,
-        WorkflowType.decompose: decompose_timeseries,
-    })
+    tyro.extras.subcommand_cli_from_dict(
+        {
+            WorkflowType.calibrate: calibrate_timeseries,
+            WorkflowType.decompose: decompose_timeseries,
+        }
+    )

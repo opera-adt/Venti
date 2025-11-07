@@ -9,21 +9,22 @@ Usage:
 
 from __future__ import annotations
 
-import sys
 import logging
-import tyro
+import sys
 from enum import Enum
+
+import tyro
 
 # Setup logging
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
 
 
 class Command(str, Enum):
     """Available Venti commands."""
+
     config = "config"
     run = "run"
 
@@ -55,6 +56,7 @@ def config_command(output_dir: str = ".") -> None:
 
         # Generate config files in specific directory
         python -m venti config --output-dir configs/
+
     """
     from .workflow.config import create_config_templates
 
@@ -75,15 +77,12 @@ def config_command(output_dir: str = ".") -> None:
         logger.info("     - Set workflow_name to 'calibrate' or 'decompose'")
         logger.info("  2. Review algorithm_parameters.yaml (defaults usually work)")
         logger.info("  3. Run: python -m venti run runconfig.yaml")
-    except Exception as e:
-        logger.error(f"Failed to create configuration templates: {e}")
+    except Exception:
+        logger.exception("Failed to create configuration templates")
         sys.exit(1)
 
 
-def run_command(
-    config_file: str,
-    log_level: str = "INFO"
-) -> None:
+def run_command(config_file: str, log_level: str = "INFO") -> None:
     """Run the Venti calibration workflow.
 
     Parameters
@@ -99,9 +98,10 @@ def run_command(
 
         python -m venti run config.yaml
         python -m venti run config.yaml --log-level DEBUG
+
     """
-    from .workflow.config import load_config
     from .workflow.calibration import CalibrationWorkflow
+    from .workflow.config import load_config
 
     # Set logging level
     numeric_level = getattr(logging, log_level.upper(), None)
@@ -122,28 +122,30 @@ def run_command(
         # Run workflow using OO API
         logger.info("Starting calibration workflow...")
         workflow = CalibrationWorkflow(config=config)
-        state = workflow.run()
+        workflow.run()
 
         logger.info("Workflow completed successfully!")
 
-    except FileNotFoundError as e:
-        logger.error(f"File not found: {e}")
+    except FileNotFoundError:
+        logger.exception("File not found")
         sys.exit(1)
-    except ValueError as e:
-        logger.error(f"Configuration error: {e}")
+    except ValueError:
+        logger.exception("Configuration error")
         sys.exit(1)
-    except Exception as e:
-        logger.error(f"Workflow failed: {e}", exc_info=True)
+    except Exception:
+        logger.exception("Workflow failed")
         sys.exit(1)
 
 
 def main() -> None:
-    """Main CLI entry point with subcommands."""
+    """Run the main CLI with subcommands."""
     # Use tyro for CLI parsing with subcommands
-    tyro.extras.subcommand_cli_from_dict({
-        Command.config: config_command,
-        Command.run: run_command,
-    })
+    tyro.extras.subcommand_cli_from_dict(
+        {
+            Command.config: config_command,
+            Command.run: run_command,
+        }
+    )
 
 
 if __name__ == "__main__":

@@ -6,22 +6,21 @@ and other common operations.
 
 from __future__ import annotations
 
-import numpy as np
-import re
-from datetime import datetime
-from pathlib import Path
-from typing import Optional
-from scipy.ndimage import zoom
 import logging
+import re
+from datetime import date, datetime
+from pathlib import Path
+
+import numpy as np
+from scipy.ndimage import zoom
 
 logger = logging.getLogger(__name__)
 
 
 def extract_dates_from_filename(
-    filename: str | Path
-) -> tuple[Optional[datetime.date], Optional[datetime.date]]:
-    """
-    Extract reference and secondary dates from OPERA filename.
+    filename: str | Path,
+) -> tuple[date | None, date | None]:
+    """Extract reference and secondary dates from OPERA filename.
 
     Parameters
     ----------
@@ -41,6 +40,7 @@ def extract_dates_from_filename(
         ref, sec = extract_dates_from_filename(
             'OPERA_L3_DISP-S1_20200101T000000_20200115T000000.nc'
         )
+
     """
     filename = str(filename)
     pattern = r"\d{8}T\d{6}"
@@ -58,8 +58,7 @@ def extract_dates_from_filename(
 
 
 def datetime_to_decimal_year(dt: datetime) -> float:
-    """
-    Convert datetime to decimal year.
+    """Convert datetime to decimal year.
 
     Parameters
     ----------
@@ -77,6 +76,7 @@ def datetime_to_decimal_year(dt: datetime) -> float:
 
         dec_year = datetime_to_decimal_year(datetime(2020, 7, 1))
         # Returns approximately 2020.5
+
     """
     year_start = datetime(dt.year, 1, 1)
     next_year_start = datetime(dt.year + 1, 1, 1)
@@ -87,11 +87,9 @@ def datetime_to_decimal_year(dt: datetime) -> float:
 
 
 def match_correction_to_displacement(
-    correction_files: Optional[list[Path]],
-    displacement_files: list[Path]
-) -> list[tuple[str, Path]]:
-    """
-    Match correction files to displacement files by date.
+    correction_files: list[Path] | None, displacement_files: list[Path]
+) -> list[tuple[str | Path, Path]]:
+    """Match correction files to displacement files by date.
 
     Parameters
     ----------
@@ -113,17 +111,18 @@ def match_correction_to_displacement(
         tropo_files = sorted(Path('tropo/').glob('*.tif'))
         disp_files = sorted(Path('disp/').glob('*.nc'))
         matches = match_correction_to_displacement(tropo_files, disp_files)
+
     """
     # Build dictionaries keyed by dates
     if correction_files is not None:
         corr_dict = {extract_dates_from_filename(f): f for f in correction_files}
     disp_dict = {extract_dates_from_filename(f): f for f in displacement_files}
 
-    matches = []
+    matches: list[tuple[str | Path, Path]] = []
 
     # If no corrections, pair with "None"
     if correction_files is None:
-        for dates, disp_file in disp_dict.items():
+        for _dates, disp_file in disp_dict.items():
             matches.append(("None", disp_file))
         return matches
 
@@ -139,12 +138,8 @@ def match_correction_to_displacement(
     return matches
 
 
-def downsample_array(
-    array: np.ndarray,
-    factor: int
-) -> np.ndarray:
-    """
-    Downsample array by given factor using mean aggregation.
+def downsample_array(array: np.ndarray, factor: int) -> np.ndarray:
+    """Downsample array by given factor using mean aggregation.
 
     Parameters
     ----------
@@ -168,6 +163,7 @@ def downsample_array(
     -----
     NaN values are preserved. If any pixel in the downsampled region is NaN,
     the output pixel is NaN.
+
     """
     if factor == 1:
         return array
@@ -194,12 +190,8 @@ def downsample_array(
     return downsampled
 
 
-def upsample_array(
-    array: np.ndarray,
-    target_shape: tuple[int, int]
-) -> np.ndarray:
-    """
-    Upsample array to target shape using bilinear interpolation.
+def upsample_array(array: np.ndarray, target_shape: tuple[int, int]) -> np.ndarray:
+    """Upsample array to target shape using bilinear interpolation.
 
     Parameters
     ----------
@@ -222,15 +214,13 @@ def upsample_array(
     Notes
     -----
     NaN values are preserved during upsampling.
+
     """
     if array.shape == target_shape:
         return array
 
     # Calculate zoom factors
-    zoom_factors = (
-        target_shape[0] / array.shape[0],
-        target_shape[1] / array.shape[1]
-    )
+    zoom_factors = (target_shape[0] / array.shape[0], target_shape[1] / array.shape[1])
 
     # Preserve NaN values
     nan_mask = np.isnan(array)
@@ -245,20 +235,15 @@ def upsample_array(
     # Re-apply NaN mask
     upsampled[mask_upsampled] = np.nan
 
-    logger.debug(
-        f"Upsampled array from {array.shape} to {upsampled.shape}"
-    )
+    logger.debug(f"Upsampled array from {array.shape} to {upsampled.shape}")
 
     return upsampled
 
 
 def compute_average_temporal_coherence(
-    netcdf_files: list[Path],
-    output_dir: Path,
-    variable: str = 'temporal_coherence'
+    netcdf_files: list[Path], output_dir: Path, variable: str = "temporal_coherence"
 ) -> Path:
-    """
-    Compute average temporal coherence from multiple NetCDF files.
+    """Compute average temporal coherence from multiple NetCDF files.
 
     Parameters
     ----------
@@ -280,9 +265,9 @@ def compute_average_temporal_coherence(
 
         nc_files = sorted(Path('data/').glob('*.nc'))
         avg_coh = compute_average_temporal_coherence(nc_files, Path('output/'))
+
     """
     import xarray as xr
-    import rioxarray
 
     output_file = output_dir / f"average_{variable}.tif"
 
@@ -296,6 +281,7 @@ def compute_average_temporal_coherence(
     data_path = f"NETCDF:{netcdf_files[0]}:/{variable}"
     try:
         import rasterio as rio
+
         with rio.open(data_path) as src:
             crs = src.crs
     except Exception:
@@ -311,7 +297,8 @@ def compute_average_temporal_coherence(
         ds.close()
 
     if not data_arrays:
-        raise ValueError(f"Variable '{variable}' not found in any files")
+        msg = f"Variable '{variable}' not found in any files"
+        raise ValueError(msg)
 
     # Compute mean
     stacked = xr.concat(data_arrays, dim="stack")
@@ -330,12 +317,8 @@ def compute_average_temporal_coherence(
     return output_file
 
 
-def parse_window_size_meters(
-    window_meters: float,
-    posting_meters: float = 30.0
-) -> int:
-    """
-    Convert window size from meters to pixels.
+def parse_window_size_meters(window_meters: float, posting_meters: float = 30.0) -> int:
+    """Convert window size from meters to pixels.
 
     Parameters
     ----------
@@ -355,16 +338,14 @@ def parse_window_size_meters(
 
         win_size = parse_window_size_meters(30000, posting_meters=30)
         # Returns 1000 pixels
+
     """
     window_pixels = int(np.rint(window_meters / posting_meters))
     return window_pixels
 
 
-def get_file_dates(
-    file_path: str | Path
-) -> tuple[float, float]:
-    """
-    Extract dates from file and convert to decimal years.
+def get_file_dates(file_path: str | Path) -> tuple[float, float]:
+    """Extract dates from file and convert to decimal years.
 
     Parameters
     ----------
@@ -381,6 +362,7 @@ def get_file_dates(
     ::
 
         ref_year, sec_year = get_file_dates('OPERA_20200101T000000_20200115T000000.nc')
+
     """
     from opera_utils import get_dates
 
@@ -392,8 +374,7 @@ def get_file_dates(
 
 
 def ensure_directory(path: str | Path) -> Path:
-    """
-    Ensure directory exists, create if needed.
+    """Ensure directory exists, create if needed.
 
     Parameters
     ----------
@@ -404,6 +385,7 @@ def ensure_directory(path: str | Path) -> Path:
     -------
     Path
         Path object for directory
+
     """
     path = Path(path)
     path.mkdir(parents=True, exist_ok=True)
