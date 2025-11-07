@@ -11,7 +11,7 @@ from pathlib import Path
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-import requests
+import requests  # type: ignore[import-untyped]
 import xarray as xr
 from rasterio.transform import from_bounds
 from scipy.interpolate import griddata

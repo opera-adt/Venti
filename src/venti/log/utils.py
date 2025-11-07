@@ -5,6 +5,7 @@ and performance monitoring, as well as demo and helper functions.
 """
 
 import logging
+import logging.handlers
 import time
 
 from .logger import get_logger
@@ -143,7 +144,6 @@ def log_function_calls(
                 func_logger.log(
                     level, f"Exiting function {func.__name__}", extra=exit_data
                 )
-
             except Exception as e:
                 # Log function exception
                 duration = time.time() - start_time
@@ -163,7 +163,6 @@ def log_function_calls(
                     exc_info=True,
                 )
                 raise
-
             else:
                 return result
 
