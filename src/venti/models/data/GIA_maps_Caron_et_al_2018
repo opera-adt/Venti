@@ -1,7 +1,7 @@
 % This file contains grid maps associated with the publication of Caron et al. (2018) "GIA Model Statistics for GRACE Hydrology,
 % Cryosphere and Ocean Science" published in Geophysical Research Letters.
 % The first two columns contain spatial coordinates in degree; columns 3 to 8 contain the expectation ("exp.")
-% and standard deviation ("std") derived from our Bayesian statistics of present-day GIA signal. 
+% and standard deviation ("std") derived from our Bayesian statistics of present-day GIA signal.
 % VLM: Vertical Land Motion, WHE: water height equivalent.
 % Colatitude (deg) Longitude (deg)	VLM (mm/yr)			Geoid rate (mm/yr)	 	Gravity rate (mm/yr WHE)
 %                                       exp.           std.            exp.            std.             exp.            std.
