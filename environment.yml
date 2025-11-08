@@ -24,7 +24,8 @@ dependencies:
   - boto3
   - requests
   # Utility + configuration
-  - click
+  - tyro
   - pyyaml
   - tqdm
+  - uv
   - pre-commit
