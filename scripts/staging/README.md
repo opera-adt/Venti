@@ -418,19 +418,19 @@ python tropo_cli.py stack \
     --frame-id 8887
 
 # 6. Download UNR GNSS data
-python unr_gnss_processing.py download \
+python unr_cli.py download \
     --frame-id 8887 \
     --output-dir ./unr \
     --start 2016-01-01 \
     --end 2024-12-31
 
 # 7. Compute GNSS velocities
-python unr_gnss_processing.py get-velocity \
+python unr_cli.py get-velocity \
     --parquet-file ./unr/unr_grid_frame8887.parquet \
     --output-dir ./velocity
 
 # 8. Extract constant velocity timeseries
-python unr_gnss_processing.py get-constant-ts-stack \
+python unr_cli.py get-constant-ts-stack \
     --disp-dir ./data \
     --velocity-file ./velocity/velocity_unr_grid.parquet \
     --output-dir ./constant_ts \
@@ -578,11 +578,11 @@ python tropo_cli.py --help
 python tropo_cli.py file --help
 python tropo_cli.py stack --help
 python tropo_cli.py db --help
-python unr_gnss_processing.py --help
-python unr_gnss_processing.py download --help
-python unr_gnss_processing.py get-velocity --help
-python unr_gnss_processing.py get-constant-ts-file --help
-python unr_gnss_processing.py get-constant-ts-stack --help
+python unr_cli.py --help
+python unr_cli.py download --help
+python unr_cli.py get-velocity --help
+python unr_cli.py get-constant-ts-file --help
+python unr_cli.py get-constant-ts-stack --help
 ```
 
 ---
