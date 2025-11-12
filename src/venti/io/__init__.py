@@ -9,12 +9,15 @@ geospatial data formats:
 from __future__ import annotations
 
 __all__ = [
+    # Product classes
+    "CalProduct",
     "NetCDFData",
     "RasterData",
     "RasterMetadata",
     # Object-oriented API
     "RasterReader",
     "RasterWriter",
+    "VlmProduct",
     "get_bounds",
     # Functional API (legacy)
     "read_geotiff",
@@ -49,6 +52,15 @@ def __getattr__(name: str):
         globals()["RasterWriter"] = RasterWriter
 
         return RasterWriter
+
+    # Product classes
+    if name in ["CalProduct", "VlmProduct"]:
+        from .product import CalProduct, VlmProduct
+
+        globals()["CalProduct"] = CalProduct
+        globals()["VlmProduct"] = VlmProduct
+
+        return globals()[name]
 
     # Functional API (legacy)
     if name in [
