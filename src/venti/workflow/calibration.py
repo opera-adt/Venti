@@ -412,14 +412,42 @@ class CalibrationWorkflow:
         original_shape = disp.shape
         if self.config.grid_settings.downsample_factor > 1:
             logger.debug(
-                f"Downsampling by factor {self.config.grid_settings.downsample_factor}"
+                f"Downsampling by factor {self.config.grid_settings.downsample_factor} "
+                f"using method '{self.config.grid_settings.downsample_method}'"
             )
+
+            # Load weights if weighted downsampling is requested
+            weights = None
+            if self.config.grid_settings.downsample_weighted:
+                try:
+                    # Try to load temporal coherence as weights
+                    coh_data = self.io_reader.read_netcdf(
+                        disp_file, variable="temporal_coherence"
+                    )
+                    weights = coh_data.data
+                    logger.debug("Using temporal coherence as downsampling weights")
+                except Exception as e:
+                    logger.warning(
+                        f"Could not load weights for downsampling: {e}. "
+                        "Using unweighted downsampling."
+                    )
+
+            # Downsample displacement
             disp_ds = downsample_array(
-                disp, self.config.grid_settings.downsample_factor
+                disp,
+                self.config.grid_settings.downsample_factor,
+                method=self.config.grid_settings.downsample_method,
+                weights=weights,
             )
+
+            # Downsample GNSS LOS
             gnss_los_ds = downsample_array(
-                gnss_los, self.config.grid_settings.downsample_factor
+                gnss_los,
+                self.config.grid_settings.downsample_factor,
+                method=self.config.grid_settings.downsample_method,
+                weights=weights,
             )
+
             win_x_ds = max(
                 1, window_size_x // self.config.grid_settings.downsample_factor
             )

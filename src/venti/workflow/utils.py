@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import re
+import warnings
 from datetime import date, datetime
 from pathlib import Path
 
@@ -138,8 +139,13 @@ def match_correction_to_displacement(
     return matches
 
 
-def downsample_array(array: np.ndarray, factor: int) -> np.ndarray:
-    """Downsample array by given factor using mean aggregation.
+def downsample_array(
+    array: np.ndarray,
+    factor: int,
+    method: str = "mean",
+    weights: np.ndarray | None = None,
+) -> np.ndarray:
+    """Downsample array by given factor using specified aggregation method.
 
     Parameters
     ----------
@@ -147,6 +153,11 @@ def downsample_array(array: np.ndarray, factor: int) -> np.ndarray:
         2D array to downsample
     factor : int
         Downsampling factor (e.g., 2 = half resolution)
+    method : str, optional
+        Aggregation method: 'mean' or 'median', by default 'mean'
+    weights : np.ndarray, optional
+        Weight array for weighted downsampling (same shape as array).
+        If provided, computes weighted mean. Ignored if method='median'.
 
     Returns
     -------
@@ -157,34 +168,86 @@ def downsample_array(array: np.ndarray, factor: int) -> np.ndarray:
     --------
     ::
 
+        # Simple mean downsampling
         downsampled = downsample_array(data, factor=4)
+
+        # Median downsampling
+        downsampled = downsample_array(data, factor=4, method='median')
+
+        # Weighted mean downsampling
+        downsampled = downsample_array(data, factor=4, method='mean', weights=coherence)
 
     Notes
     -----
-    NaN values are preserved. If any pixel in the downsampled region is NaN,
-    the output pixel is NaN.
+    NaN values are handled using nanmean or nanmedian. Blocks with all NaN
+    values will result in NaN in the output.
 
     """
     if factor == 1:
         return array
 
-    # Preserve NaN values
-    nan_mask = np.isnan(array)
+    if method not in ["mean", "median"]:
+        msg = f"Invalid method '{method}'. Must be 'mean' or 'median'"
+        raise ValueError(msg)
 
-    # Downsample mask - if ANY pixel is NaN, mark as NaN
-    mask_downsampled = zoom(nan_mask.astype(float), 1.0 / factor, order=0) > 0.0
+    # Calculate output shape
+    new_shape = (array.shape[0] // factor, array.shape[1] // factor)
 
-    # For valid data, use nanmean-like behavior
-    array_filled = np.where(nan_mask, 0, array)
+    # Trim array to be evenly divisible by factor
+    trimmed_rows = new_shape[0] * factor
+    trimmed_cols = new_shape[1] * factor
+    array_trimmed = array[:trimmed_rows, :trimmed_cols]
 
-    # Downsample data
-    downsampled = zoom(array_filled, 1.0 / factor, order=1)
+    if weights is not None and method == "mean":
+        weights_trimmed = weights[:trimmed_rows, :trimmed_cols]
+        # Ensure weights are valid
+        weights_trimmed = np.where(np.isnan(weights_trimmed), 0, weights_trimmed)
+        weights_trimmed = np.where(weights_trimmed < 0, 0, weights_trimmed)
 
-    # Re-apply NaN mask
-    downsampled[mask_downsampled] = np.nan
+    # Reshape to blocks
+    blocks = array_trimmed.reshape(
+        new_shape[0], factor, new_shape[1], factor
+    ).transpose(0, 2, 1, 3)
+
+    if method == "mean":
+        if weights is not None:
+            # Weighted mean
+            weight_blocks = weights_trimmed.reshape(
+                new_shape[0], factor, new_shape[1], factor
+            ).transpose(0, 2, 1, 3)
+
+            # Compute weighted mean, handling NaN values
+            with np.errstate(invalid="ignore", divide="ignore"):
+                # Set NaN values to 0 weight
+                weight_blocks_masked = np.where(np.isnan(blocks), 0, weight_blocks)
+                data_masked = np.where(np.isnan(blocks), 0, blocks)
+
+                # Sum of weighted values
+                weighted_sum = np.sum(data_masked * weight_blocks_masked, axis=(2, 3))
+                # Sum of weights
+                weight_sum = np.sum(weight_blocks_masked, axis=(2, 3))
+
+                # Weighted mean
+                downsampled = weighted_sum / weight_sum
+
+                # Set to NaN where all weights are zero
+                downsampled = np.where(weight_sum == 0, np.nan, downsampled)
+        else:
+            # Regular mean, ignoring NaN
+            # Suppress warning about mean of empty slice (when all values are NaN)
+            with warnings.catch_warnings():
+                warnings.filterwarnings("ignore", r"Mean of empty slice")
+                downsampled = np.nanmean(blocks, axis=(2, 3))
+    else:  # median
+        # Use nanmedian, ignoring NaN values
+        # Suppress warning about invalid value encountered
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", r"All-NaN (slice|axis) encountered")
+            downsampled = np.nanmedian(blocks, axis=(2, 3))
 
     logger.debug(
-        f"Downsampled array from {array.shape} to {downsampled.shape} (factor={factor})"
+        f"Downsampled array from {array.shape} to {downsampled.shape} "
+        f"(factor={factor}, method={method}, weighted={weights is not None})"
     )
 
     return downsampled
