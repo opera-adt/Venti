@@ -22,6 +22,12 @@ calibration_input_group:
   # REQUIRED: Path to water mask file (GeoTIFF, 1=valid land, 0=invalid/water)
   water_mask: path/to/water_mask.tif
 
+  # OPTIONAL: Path to custom mask file (GeoTIFF, 1=valid, 0=invalid). Combined with water_mask if provided
+  custom_mask: null
+
+  # OPTIONAL: Path to GeoJSON file defining frame boundaries for processing
+  frame_bounds: null
+
   # OPTIONAL: Directory with tropospheric correction NetCDF files
   tropo_files: null
 
@@ -47,6 +53,12 @@ decomposition_input_group:
 
   # REQUIRED: Path to water mask file (GeoTIFF, 1=valid land, 0=invalid/water)
   water_mask: path/to/water_mask.tif
+
+  # OPTIONAL: Path to custom mask file (GeoTIFF, 1=valid, 0=invalid). Combined with water_mask if provided
+  custom_mask: null
+
+  # OPTIONAL: Path to GeoJSON file defining frame boundaries for processing
+  frame_bounds: null
 
   # OPTIONAL: Path to ascending static layers GeoTIFF (temporal coherence, amplitude dispersion, etc.)
   asc_static_layers: null
@@ -78,8 +90,8 @@ product_path_group:
 # Primary executable configuration - SET WORKFLOW HERE
 primary_executable:
   # Product type of the workflow
-  # Options: VENTI_CALIBRATION, VENTI_DECOMPOSITION
-  product_type: VENTI_CALIBRATION
+  # Options: CAL, VLM
+  product_type: CAL
 
   # Name of the workflow to execute
   # Options: calibrate, decompose

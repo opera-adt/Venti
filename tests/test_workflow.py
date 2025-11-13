@@ -20,6 +20,7 @@ from venti.workflow.config import (
     DecompositionOptions,
     OutputOptions,
     PrimaryExecutable,
+    ProcessingOptions,
     ProductPathGroup,
     RunConfig,
     VentiConfig,
@@ -38,6 +39,43 @@ from venti.workflow.utils import (
 )
 
 
+class TestProcessingOptions:
+    """Test cases for ProcessingOptions model."""
+
+    def test_default_values(self):
+        """Test default processing options."""
+        opts = ProcessingOptions()
+        assert opts.cal_downsample_factor == 1
+        assert opts.downsample_method == "mean"
+        assert opts.downsample_weighted is False
+        assert opts.vlm_output_posting_meters == 120.0
+
+    def test_custom_values(self):
+        """Test custom processing options."""
+        opts = ProcessingOptions(
+            cal_downsample_factor=2,
+            downsample_method="median",
+            downsample_weighted=True,
+            vlm_output_posting_meters=90.0,
+        )
+        assert opts.cal_downsample_factor == 2
+        assert opts.downsample_method == "median"
+        assert opts.downsample_weighted is True
+        assert opts.vlm_output_posting_meters == 90.0
+
+    def test_invalid_method(self):
+        """Test validation of downsample_method."""
+        with pytest.raises(ValueError, match="downsample_method|Input should be"):
+            ProcessingOptions(downsample_method="invalid")
+
+    def test_invalid_downsample_factor(self):
+        """Test validation of cal_downsample_factor."""
+        with pytest.raises(
+            ValueError, match="greater than or equal to|Input should be"
+        ):
+            ProcessingOptions(cal_downsample_factor=0)
+
+
 class TestCalibrationOptions:
     """Test cases for CalibrationOptions model."""
 
@@ -48,9 +86,10 @@ class TestCalibrationOptions:
         assert opts.reference_frame == "IGS20"
         assert opts.starting_year == 2014.0
         assert opts.unwrap_error_correction is True
-        assert opts.downsample_factor == 1
         assert opts.window_size_meters == 30000.0
         assert opts.posting_meters == 30.0
+        assert opts.longwavelength_filter_method == "none"
+        assert opts.cutoff_wavelength_meters == 100000.0
 
     def test_custom_values(self):
         """Test custom calibration options."""
@@ -59,7 +98,6 @@ class TestCalibrationOptions:
             reference_frame="IGS14",
             starting_year=2020.0,
             unwrap_error_correction=False,
-            downsample_factor=2,
             window_size_meters=50000.0,
             posting_meters=60.0,
         )
@@ -67,7 +105,6 @@ class TestCalibrationOptions:
         assert opts.reference_frame == "IGS14"
         assert opts.starting_year == 2020.0
         assert opts.unwrap_error_correction is False
-        assert opts.downsample_factor == 2
         assert opts.window_size_meters == 50000.0
         assert opts.posting_meters == 60.0
 
@@ -75,13 +112,6 @@ class TestCalibrationOptions:
         """Test validation of grid_type."""
         with pytest.raises(ValueError, match="grid_type|Input should be"):
             CalibrationOptions(grid_type="invalid")
-
-    def test_invalid_downsample_factor(self):
-        """Test validation of downsample_factor."""
-        with pytest.raises(
-            ValueError, match="greater than or equal to|Input should be"
-        ):
-            CalibrationOptions(downsample_factor=0)
 
 
 class TestDecompositionOptions:
@@ -213,16 +243,16 @@ class TestPrimaryExecutable:
     def test_default_values(self):
         """Test default primary executable."""
         exe = PrimaryExecutable()
-        assert exe.product_type == "VENTI_CALIBRATION"
+        assert exe.product_type == "CAL"
         assert exe.workflow_name == "calibrate"
 
     def test_decomposition_workflow(self):
         """Test decomposition workflow configuration."""
         exe = PrimaryExecutable(
-            product_type="VENTI_DECOMPOSITION",
+            product_type="VLM",
             workflow_name="decompose",
         )
-        assert exe.product_type == "VENTI_DECOMPOSITION"
+        assert exe.product_type == "VLM"
         assert exe.workflow_name == "decompose"
 
 
@@ -319,7 +349,7 @@ class TestRunConfig:
                 water_mask=Path("path/to/mask.tif"),
             ),
             primary_executable=PrimaryExecutable(
-                product_type="VENTI_CALIBRATION",
+                product_type="CAL",
                 workflow_name="calibrate",
             ),
         )
@@ -338,7 +368,7 @@ class TestRunConfig:
                 water_mask=Path("path/to/mask.tif"),
             ),
             primary_executable=PrimaryExecutable(
-                product_type="VENTI_DECOMPOSITION",
+                product_type="VLM",
                 workflow_name="decompose",
             ),
         )
@@ -397,6 +427,7 @@ class TestAlgorithmParameters:
     def test_default_values(self):
         """Test default algorithm parameters."""
         params = AlgorithmParameters()
+        assert isinstance(params.processing_options, ProcessingOptions)
         assert isinstance(params.calibration_options, CalibrationOptions)
         assert isinstance(params.decomposition_options, DecompositionOptions)
         assert isinstance(params.output_options, OutputOptions)
@@ -453,6 +484,50 @@ class TestVentiConfig:
             assert isinstance(config.run_config, RunConfig)
             assert isinstance(config.algorithm_parameters, AlgorithmParameters)
 
+    def test_compatibility_properties(self):
+        """Test backward compatibility properties (grid_settings, input_options, etc)."""
+        with tempfile.TemporaryDirectory() as tmp:
+            tmpdir = Path(tmp)
+            runconfig_path = tmpdir / "runconfig.yaml"
+            algorithm_params_path = tmpdir / "algorithm_parameters.yaml"
+
+            # Create config with specific values
+            run_config = RunConfig(
+                calibration_input_group=CalibrationInputGroup(
+                    input_files=Path("path/to/displacement/files"),
+                    los_file=Path("path/to/los.tif"),
+                    water_mask=Path("path/to/mask.tif"),
+                ),
+                primary_executable=PrimaryExecutable(workflow_name="calibrate"),
+            )
+            run_config.to_yaml(runconfig_path)
+
+            algorithm_params = AlgorithmParameters(
+                processing_options=ProcessingOptions(
+                    cal_downsample_factor=2,
+                    downsample_method="median",
+                    downsample_weighted=True,
+                    vlm_output_posting_meters=90.0,
+                ),
+                calibration_options=CalibrationOptions(
+                    grid_type="variable",
+                ),
+            )
+            algorithm_params.to_yaml(algorithm_params_path)
+
+            # Load combined config
+            config = VentiConfig.from_yaml_files(runconfig_path, algorithm_params_path)
+
+            # Test compatibility properties
+            assert config.grid_settings.grid_type == "variable"
+            assert config.grid_settings.downsample_factor == 2
+            assert config.grid_settings.downsample_method == "median"
+            assert config.grid_settings.downsample_weighted is True
+            assert config.grid_settings.output_posting_meters == 90.0
+
+            assert config.input_options is not None
+            assert config.worker_settings is not None
+
 
 class TestConfigHelperFunctions:
     """Test cases for configuration helper functions."""
@@ -475,6 +550,7 @@ class TestConfigHelperFunctions:
             # Verify algorithm parameters content
             with open(algorithm_params_path) as f:
                 algorithm_data = yaml.safe_load(f)
+            assert "processing_options" in algorithm_data
             assert "calibration_options" in algorithm_data
             assert "decomposition_options" in algorithm_data
             assert "output_options" in algorithm_data
@@ -675,6 +751,43 @@ class TestDownsampleArray:
 
         # Check that NaNs are present in downsampled array
         assert np.any(np.isnan(downsampled))
+
+    def test_downsample_method_mean(self):
+        """Test downsampling with mean method."""
+        array = np.arange(100).reshape(10, 10).astype(float)
+        downsampled = downsample_array(array, factor=2, method="mean")
+
+        assert downsampled.shape == (5, 5)
+        # Check that values are reasonable (mean of blocks)
+        assert np.all(downsampled >= 0)
+
+    def test_downsample_method_median(self):
+        """Test downsampling with median method."""
+        array = np.arange(100).reshape(10, 10).astype(float)
+        downsampled = downsample_array(array, factor=2, method="median")
+
+        assert downsampled.shape == (5, 5)
+        # Check that values are reasonable (median of blocks)
+        assert np.all(downsampled >= 0)
+
+    def test_downsample_with_weights(self):
+        """Test weighted downsampling."""
+        array = np.ones((100, 100))
+        weights = np.ones((100, 100)) * 0.5
+        # Higher weight in one region
+        weights[0:50, 0:50] = 1.0
+
+        downsampled = downsample_array(array, factor=2, method="mean", weights=weights)
+
+        assert downsampled.shape == (50, 50)
+        # Should still be close to 1 since data is uniform
+        assert np.allclose(downsampled[~np.isnan(downsampled)], 1.0)
+
+    def test_downsample_invalid_method(self):
+        """Test that invalid method raises error."""
+        array = np.ones((100, 100))
+        with pytest.raises(ValueError, match="Invalid method"):
+            downsample_array(array, factor=2, method="invalid")
 
 
 class TestUpsampleArray:

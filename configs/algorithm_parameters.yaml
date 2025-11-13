@@ -24,12 +24,6 @@ calibration_options:
   # Type: boolean
   unwrap_error_correction: true
 
-  # Downsample factor for performing plane fitting at lower resolution
-  # 1 means no downsampling, 2 means half resolution, etc.
-  # Higher values = faster processing but less detail
-  # Type: integer
-  downsample_factor: 1
-
   # Window size for plane fitting in meters
   # Larger windows smooth more but may miss local variations
   # Typical values: 10000-50000
@@ -40,6 +34,61 @@ calibration_options:
   # Used for coordinate transformations
   # Type: number
   posting_meters: 30.0
+
+  # Longwavelength filtering method for removing orbital/atmospheric signals
+  # Type: string
+  # Options: ['none', 'savitzky_golay', 'fft_gaussian', 'fft_butterworth', 'fft_ideal']
+  longwavelength_filter_method: none
+
+  # Cutoff wavelength in meters for longwavelength filtering
+  # Signals with wavelengths longer than this will be removed
+  # Typical values: 50000-200000 (50-200 km)
+  # Type: number
+  cutoff_wavelength_meters: 100000.0
+
+  # Moving window filter size in meters (for 'moving_window' method)
+  # Should be approximately equal to cutoff_wavelength_meters
+  # Type: number
+  moving_window_size_meters: 100000.0
+
+  # Savitzky-Golay filter parameters (for 'savitzky_golay' method)
+  savitzky_golay:
+    # Window length in pixels (must be odd)
+    # Type: integer
+    window_length: 51
+
+    # Polynomial order for fitting
+    # Lower order = smoother, higher order = preserves more detail
+    # Type: integer
+    polyorder: 3
+
+    # Derivative order (0 for smoothing, 1 for first derivative, etc.)
+    # Type: integer
+    deriv: 0
+
+  # FFT-based filter parameters (for 'fft_*' methods)
+  fft_filter:
+    # Gaussian filter standard deviation in wavelength units
+    # Only used for 'fft_gaussian' method
+    # Type: number
+    gaussian_sigma: 0.1
+
+    # Butterworth filter order (for 'fft_butterworth' method)
+    # Higher order = sharper cutoff, lower order = smoother transition
+    # Type: integer
+    butterworth_order: 4
+
+    # Apply filter in spatial domain vs frequency domain
+    # Type: boolean
+    spatial_domain: false
+
+    # Taper edges to reduce edge effects
+    # Type: boolean
+    taper_edges: true
+
+    # Taper width as fraction of image dimensions
+    # Type: number (0.0 to 0.5)
+    taper_width: 0.05
 
 decomposition_options:
   # Method for least-squares inversion
@@ -70,6 +119,31 @@ decomposition_options:
   # Pixels below this threshold will be masked out
   # Type: number (0.0 to 1.0)
   quality_threshold: 0.5
+
+processing_options:
+  # Downsample factor for performing operations at lower resolution
+  # Used by calibration (plane fitting) and decomposition (output grids)
+  # 1 means no downsampling, 2 means half resolution, etc.
+  # Higher values = faster processing but less detail
+  # Type: integer
+  cal_downsample_factor: 1
+
+  # Method for aggregating pixels during downsampling
+  # Used by both calibration and decomposition workflows
+  # Type: string
+  # Options: ['mean', 'median']
+  downsample_method: mean
+
+  # Whether to use weighted downsampling (based on coherence or quality)
+  # Used by both calibration and decomposition workflows
+  # Type: boolean
+  downsample_weighted: false
+
+  # Output grid posting in meters for decomposed ENU components
+  # Controls the resolution of output displacement grids
+  # If larger than input posting, data will be downsampled/aggregated
+  # Type: number
+  vlm_output_posting_meters: 120.0
 
 output_options:
   # GDAL creation options for GeoTIFF output files

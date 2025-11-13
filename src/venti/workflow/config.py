@@ -18,6 +18,103 @@ from pydantic import BaseModel, Field, field_validator
 # ============================================================================
 
 
+class ProcessingOptions(BaseModel):
+    """Common processing options used by multiple workflows.
+
+    Attributes
+    ----------
+    cal_downsample_factor : int
+        Downsample factor for plane fitting
+    downsample_method : str
+        Method for aggregating pixels during downsampling
+    downsample_weighted : bool
+        Whether to use weighted downsampling
+    vlm_output_posting_meters : float
+        Output grid posting in meters for decomposed ENU components
+
+    """
+
+    cal_downsample_factor: int = Field(
+        1,
+        ge=1,
+        description=(
+            "Downsample factor for performing plane fitting at lower resolution"
+        ),
+    )
+    downsample_method: Literal["mean", "median"] = Field(
+        "mean",
+        description="Method for aggregating pixels during downsampling",
+    )
+    downsample_weighted: bool = Field(
+        False,
+        description=(
+            "Whether to use weighted downsampling (based on coherence or quality)"
+        ),
+    )
+    vlm_output_posting_meters: float = Field(
+        120.0,
+        gt=0,
+        description="Output grid posting in meters for decomposed ENU components",
+    )
+
+
+class SavitzkyGolayOptions(BaseModel):
+    """Savitzky-Golay filter options.
+
+    Attributes
+    ----------
+    window_length : int
+        Window length in pixels (must be odd)
+    polyorder : int
+        Polynomial order for fitting
+    deriv : int
+        Derivative order (0 for smoothing, 1 for first derivative, etc.)
+
+    """
+
+    window_length: int = Field(
+        51, ge=3, description="Window length in pixels (must be odd)"
+    )
+    polyorder: int = Field(3, ge=0, description="Polynomial order for fitting")
+    deriv: int = Field(0, ge=0, description="Derivative order (0 for smoothing)")
+
+
+class FFTFilterOptions(BaseModel):
+    """FFT-based filter options.
+
+    Attributes
+    ----------
+    gaussian_sigma : float
+        Gaussian filter standard deviation in wavelength units
+    butterworth_order : int
+        Butterworth filter order
+    spatial_domain : bool
+        Apply filter in spatial domain vs frequency domain
+    taper_edges : bool
+        Taper edges to reduce edge effects
+    taper_width : float
+        Taper width as fraction of image dimensions
+
+    """
+
+    gaussian_sigma: float = Field(
+        0.1,
+        gt=0,
+        description="Gaussian filter standard deviation in wavelength units",
+    )
+    butterworth_order: int = Field(4, ge=1, description="Butterworth filter order")
+    spatial_domain: bool = Field(
+        False, description="Apply filter in spatial domain vs frequency domain"
+    )
+    taper_edges: bool = Field(True, description="Taper edges to reduce edge effects")
+    taper_width: float = Field(
+        0.05,
+        ge=0.0,
+        le=0.5,
+        description="Taper width as fraction of image dimensions",
+    )
+
+
 class CalibrationOptions(BaseModel):
     """Calibration algorithm options.
 
@@ -31,12 +128,20 @@ class CalibrationOptions(BaseModel):
         Starting year for velocity estimation
     unwrap_error_correction : bool
         Whether to correct islands for unwrap errors
-    downsample_factor : int
-        Downsample factor for plane fitting
     window_size_meters : float
         Window size for plane fitting in meters
     posting_meters : float
         Input data posting in meters
+    longwavelength_filter_method : str
+        Longwavelength filtering method
+    cutoff_wavelength_meters : float
+        Cutoff wavelength for longwavelength filtering
+    moving_window_size_meters : float
+        Moving window filter size in meters
+    savitzky_golay : SavitzkyGolayOptions
+        Savitzky-Golay filter parameters
+    fft_filter : FFTFilterOptions
+        FFT-based filter parameters
 
     """
 
@@ -60,18 +165,41 @@ class CalibrationOptions(BaseModel):
             "Whether to correct islands for unwrap errors using watershed segmentation"
         ),
     )
-    downsample_factor: int = Field(
-        1,
-        ge=1,
-        description=(
-            "Downsample factor for performing plane fitting at lower resolution"
-        ),
-    )
     window_size_meters: float = Field(
         30000.0, gt=0, description="Window size for plane fitting in meters"
     )
     posting_meters: float = Field(
         30.0, gt=0, description="Input data posting (pixel spacing) in meters"
+    )
+    longwavelength_filter_method: Literal[
+        "none",
+        "savitzky_golay",
+        "fft_gaussian",
+        "fft_butterworth",
+        "fft_ideal",
+    ] = Field(
+        "none",
+        description=(
+            "Longwavelength filtering method for removing orbital/atmospheric signals"
+        ),
+    )
+    cutoff_wavelength_meters: float = Field(
+        100000.0,
+        gt=0,
+        description="Cutoff wavelength in meters for longwavelength filtering",
+    )
+    moving_window_size_meters: float = Field(
+        100000.0,
+        gt=0,
+        description="Moving window filter size in meters",
+    )
+    savitzky_golay: SavitzkyGolayOptions = Field(
+        default_factory=SavitzkyGolayOptions,
+        description="Savitzky-Golay filter parameters",
+    )
+    fft_filter: FFTFilterOptions = Field(
+        default_factory=FFTFilterOptions,
+        description="FFT-based filter parameters",
     )
 
 
@@ -90,6 +218,8 @@ class DecompositionOptions(BaseModel):
         Only solve for vertical component (ignore horizontal)
     geometry_weighting : str
         How to weight different geometries
+    quality_threshold : float
+        Minimum quality metric for including pixels
 
     """
 
@@ -160,6 +290,10 @@ class AlgorithmParameters(BaseModel):
     between runs. These are saved in algorithm_parameters.yaml.
     """
 
+    processing_options: ProcessingOptions = Field(
+        default_factory=ProcessingOptions,
+        description="Common processing settings used by multiple workflows",
+    )
     calibration_options: CalibrationOptions = Field(
         default_factory=CalibrationOptions,
         description="Settings for calibration workflow",
@@ -216,6 +350,10 @@ class CalibrationInputGroup(BaseModel):
         Path to LOS unit vector file (3-band GeoTIFF: east, north, up)
     water_mask : Path
         Path to water mask file (GeoTIFF)
+    custom_mask : Path, optional
+        Path to custom mask file (GeoTIFF, 1=valid, 0=invalid)
+    frame_bounds : Path, optional
+        Path to GeoJSON file defining frame boundaries
     tropo_files : Path, optional
         Directory with tropospheric correction files
     reference_point : tuple[int, int], optional
@@ -240,6 +378,17 @@ class CalibrationInputGroup(BaseModel):
         ...,
         description="Path to water mask file (GeoTIFF, 1=valid land, 0=invalid/water)",
     )
+    custom_mask: Path | None = Field(
+        None,
+        description=(
+            "Path to custom mask file (GeoTIFF, 1=valid, 0=invalid). "
+            "Combined with water_mask if provided"
+        ),
+    )
+    frame_bounds: Path | None = Field(
+        None,
+        description="Path to GeoJSON file defining frame boundaries for processing",
+    )
     tropo_files: Path | None = Field(
         None,
         description="Directory with tropospheric correction NetCDF files (optional)",
@@ -260,7 +409,7 @@ class CalibrationInputGroup(BaseModel):
             return Path(v)
         return v
 
-    @field_validator("tropo_files", mode="before")
+    @field_validator("custom_mask", "frame_bounds", "tropo_files", mode="before")
     @classmethod
     def convert_optional_to_path(cls, v):
         """Convert optional string paths to Path objects."""
@@ -280,7 +429,7 @@ class CalibrationInputGroup(BaseModel):
             raise ValueError(msg)
         return v
 
-    @field_validator("tropo_files")
+    @field_validator("custom_mask", "frame_bounds", "tropo_files")
     @classmethod
     def validate_optional_exists(cls, v):
         """Validate that optional paths exist if provided.
@@ -313,6 +462,10 @@ class DecompositionInputGroup(BaseModel):
         Path to descending LOS unit vector file (3-band GeoTIFF: east, north, up)
     water_mask : Path
         Path to water mask file (GeoTIFF)
+    custom_mask : Path, optional
+        Path to custom mask file (GeoTIFF, 1=valid, 0=invalid)
+    frame_bounds : Path, optional
+        Path to GeoJSON file defining frame boundaries
     asc_static_layers : Path, optional
         Path to ascending static layers file (GeoTIFF with temporal coherence, etc.)
     desc_static_layers : Path, optional
@@ -349,6 +502,17 @@ class DecompositionInputGroup(BaseModel):
     water_mask: Path = Field(
         ...,
         description="Path to water mask file (GeoTIFF, 1=valid land, 0=invalid/water)",
+    )
+    custom_mask: Path | None = Field(
+        None,
+        description=(
+            "Path to custom mask file (GeoTIFF, 1=valid, 0=invalid). "
+            "Combined with water_mask if provided"
+        ),
+    )
+    frame_bounds: Path | None = Field(
+        None,
+        description="Path to GeoJSON file defining frame boundaries for processing",
     )
     asc_static_layers: Path | None = Field(
         None,
@@ -387,7 +551,13 @@ class DecompositionInputGroup(BaseModel):
             return Path(v)
         return v
 
-    @field_validator("asc_static_layers", "desc_static_layers", mode="before")
+    @field_validator(
+        "custom_mask",
+        "frame_bounds",
+        "asc_static_layers",
+        "desc_static_layers",
+        mode="before",
+    )
     @classmethod
     def convert_optional_to_path(cls, v):
         """Convert optional string paths to Path objects."""
@@ -413,7 +583,9 @@ class DecompositionInputGroup(BaseModel):
             raise ValueError(msg)
         return v
 
-    @field_validator("asc_static_layers", "desc_static_layers")
+    @field_validator(
+        "custom_mask", "frame_bounds", "asc_static_layers", "desc_static_layers"
+    )
     @classmethod
     def validate_optional_exists(cls, v):
         """Validate that optional paths exist if provided.
@@ -527,8 +699,8 @@ class PrimaryExecutable(BaseModel):
 
     """
 
-    product_type: Literal["VENTI_CALIBRATION", "VENTI_DECOMPOSITION"] = Field(
-        "VENTI_CALIBRATION", description="Product type of the workflow"
+    product_type: Literal["CAL", "VLM"] = Field(
+        "CAL", description="Product type of the workflow"
     )
     workflow_name: Literal["calibrate", "decompose"] = Field(
         "calibrate", description="Name of the workflow to execute"
@@ -583,7 +755,7 @@ class RunConfig(BaseModel):
         "extra": "forbid",
     }
 
-    def model_post_init(self, __context, /) -> None:
+    def model_post_init(self, _: object, /) -> None:
         """Validate that the correct input group is provided for the workflow type."""
         workflow_name = self.primary_executable.workflow_name
 
@@ -659,6 +831,91 @@ class VentiConfig(BaseModel):
     run_config: RunConfig
     algorithm_parameters: AlgorithmParameters
 
+    # Compatibility properties for old interface
+    @property
+    def input_options(self):
+        """Compatibility property.
+
+        Maps to run_config.calibration_input_group or input_file_group.
+        """
+        if (
+            hasattr(self.run_config, "calibration_input_group")
+            and self.run_config.calibration_input_group
+        ):
+            return self.run_config.calibration_input_group
+        if (
+            hasattr(self.run_config, "input_file_group")
+            and self.run_config.input_file_group
+        ):
+            return self.run_config.input_file_group
+        return None
+
+    @property
+    def worker_settings(self):
+        """Compatibility property: maps to run_config.worker_settings."""
+        return self.run_config.worker_settings
+
+    @property
+    def grid_settings(self):
+        """Compatibility property.
+
+        Provides combined view of calibration and processing options.
+        """
+
+        # Create a dynamic object that combines calibration_options
+        # and processing_options
+        class GridSettings:
+            def __init__(self, config):
+                self.config = config
+
+            @property
+            def grid_type(self):
+                return self.config.algorithm_parameters.calibration_options.grid_type
+
+            @property
+            def reference_frame(self):
+                return (
+                    self.config.algorithm_parameters.calibration_options.reference_frame
+                )
+
+            @property
+            def starting_year(self):
+                return (
+                    self.config.algorithm_parameters.calibration_options.starting_year
+                )
+
+            @property
+            def downsample_factor(self):
+                proc_opts = self.config.algorithm_parameters.processing_options
+                return proc_opts.cal_downsample_factor
+
+            @property
+            def downsample_method(self):
+                proc_opts = self.config.algorithm_parameters.processing_options
+                return proc_opts.downsample_method
+
+            @property
+            def downsample_weighted(self):
+                proc_opts = self.config.algorithm_parameters.processing_options
+                return proc_opts.downsample_weighted
+
+            @property
+            def window_size_meters(self):
+                cal_opts = self.config.algorithm_parameters.calibration_options
+                return cal_opts.window_size_meters
+
+            @property
+            def posting_meters(self):
+                cal_opts = self.config.algorithm_parameters.calibration_options
+                return cal_opts.posting_meters
+
+            @property
+            def output_posting_meters(self):
+                proc_opts = self.config.algorithm_parameters.processing_options
+                return proc_opts.vlm_output_posting_meters
+
+        return GridSettings(self)
+
     @classmethod
     def from_yaml_files(
         cls,
@@ -724,12 +981,14 @@ class VentiConfig(BaseModel):
         )
 
         algorithm_params = AlgorithmParameters(
+            processing_options=ProcessingOptions(
+                cal_downsample_factor=old_config.grid_settings.downsample_factor,
+            ),
             calibration_options=CalibrationOptions(
                 grid_type=old_config.grid_settings.grid_type,
                 reference_frame=old_config.grid_settings.reference_frame,
                 starting_year=old_config.grid_settings.starting_year,
                 unwrap_error_correction=old_config.unwrap_error_correction,
-                downsample_factor=old_config.grid_settings.downsample_factor,
                 window_size_meters=old_config.grid_settings.window_size_meters,
                 posting_meters=old_config.grid_settings.posting_meters,
             ),
@@ -909,6 +1168,8 @@ def create_config_templates(output_dir: str | Path = ".") -> tuple[Path, Path]:
             input_files=Path("path/to/displacement/files"),
             los_file=Path("path/to/los_vectors.tif"),
             water_mask=Path("path/to/water_mask.tif"),
+            custom_mask=None,
+            frame_bounds=None,
             tropo_files=None,
             reference_point=None,
         ),
@@ -918,12 +1179,14 @@ def create_config_templates(output_dir: str | Path = ".") -> tuple[Path, Path]:
             asc_los_file=Path("path/to/asc_los_vectors.tif"),
             desc_los_file=Path("path/to/desc_los_vectors.tif"),
             water_mask=Path("path/to/water_mask.tif"),
+            custom_mask=None,
+            frame_bounds=None,
             asc_static_layers=None,
             desc_static_layers=None,
             reference_point=None,
         ),
         primary_executable=PrimaryExecutable(
-            product_type="VENTI_CALIBRATION",
+            product_type="CAL",
             workflow_name="calibrate",
         ),
     )

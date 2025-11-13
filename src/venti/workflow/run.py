@@ -189,6 +189,7 @@ def calibrate_timeseries(
         CalibrationInputGroup,
         CalibrationOptions,
         PrimaryExecutable,
+        ProcessingOptions,
         ProductPathGroup,
         WorkerSettings,
     )
@@ -213,7 +214,7 @@ def calibrate_timeseries(
             product_version="1.0",
         ),
         primary_executable=PrimaryExecutable(
-            product_type="VENTI_CALIBRATION",
+            product_type="CAL",
             workflow_name="calibrate",
         ),
         worker_settings=WorkerSettings(
@@ -225,12 +226,14 @@ def calibrate_timeseries(
     )
 
     algorithm_params = AlgorithmParameters(
+        processing_options=ProcessingOptions(
+            cal_downsample_factor=downsample_factor,
+        ),
         calibration_options=CalibrationOptions(
             grid_type=grid_type,
             reference_frame=reference_frame,
             starting_year=start_year,
             unwrap_error_correction=unwrap_error_correction,
-            downsample_factor=downsample_factor,
             window_size_meters=window_size_meters,
             posting_meters=posting_meters,
         ),
@@ -355,7 +358,7 @@ def decompose_timeseries(
             product_version="1.0",
         ),
         primary_executable=PrimaryExecutable(
-            product_type="VENTI_DECOMPOSITION",
+            product_type="VLM",
             workflow_name="decompose",
         ),
         worker_settings=WorkerSettings(
