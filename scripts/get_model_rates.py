@@ -23,6 +23,7 @@ import tyro
 from pyproj import Transformer
 from rasterio.transform import Affine, from_bounds
 from rasterio.warp import Resampling, reproject
+from tyro import conf
 
 from venti.log import get_logger
 from venti.models import load_gia, load_itrf, plate_motion
@@ -160,11 +161,11 @@ def make_point_grid(
         transformer = Transformer.from_crs(utm_crs, target_crs, always_xy=True)
         x, y = transformer.transform(gridx, gridy)
 
+        logger.info(f"Generated grid with {x.size} points")
     except Exception:
         logger.exception("Error generating grid")
         raise
     else:
-        logger.info(f"Generated grid with {x.size} points")
         return x, y
 
 
@@ -254,10 +255,10 @@ def get_frame_pmm(
         modeled_velocities = modeled_velocities[0]
 
     # Reshape velocity components back to 2D grid
-    pmm_east_velocity = modeled_velocities[:, 0].reshape(
+    pmm_east_velocity = modeled_velocities[:, 0].reshape(  # type: ignore[call-overload]
         (grid_height, grid_width)
     )  # East-West component
-    pmm_north_velocity = modeled_velocities[:, 1].reshape(
+    pmm_north_velocity = modeled_velocities[:, 1].reshape(  # type: ignore[call-overload]
         (grid_height, grid_width)
     )  # North-South component
 
@@ -314,7 +315,7 @@ def get_gia(
     elif model_upper == "ICE6":
         # Download and load ICE6G model data
         ice6_file_path = Path(load_gia.download_ice6g_data())
-        gia_model = load_gia.load_ice6g_model(ice6_file_path)
+        gia_model = load_gia.load_ice6g_model(str(ice6_file_path))
 
         # Clean up temporary file
         with suppress(FileNotFoundError):

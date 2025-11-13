@@ -16,7 +16,8 @@ except ImportError:
     HAS_RASTERIO = False
     Affine = None
 
-from venti.unwrap import UnwrapCorrector, correct_region_offset, read_netcdf
+from venti.io import read_netcdf
+from venti.unwrap import UnwrapCorrector, correct_region_offset
 
 
 class TestUnwrapCorrector:
@@ -396,7 +397,7 @@ class TestSaveGeoTIFF:
 
         try:
             # Should raise ValueError when transform is missing
-            with pytest.raises(ValueError, match="transform must be provided"):
+            with pytest.raises(ValueError, match="transform|reference"):
                 corrector.save_geotiff(
                     corrected_disp=corrected, output_path=tmp_path, crs="EPSG:32611"
                 )

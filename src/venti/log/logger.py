@@ -238,7 +238,7 @@ def get_logger(
     config = LoggerConfig(
         name=name,
         level=level,
-        log_dir=log_dir,
+        log_dir=Path(log_dir) if log_dir else None,
         enable_file_logging=enable_file_logging,
         enable_json_logging=enable_json_logging,
     )

@@ -1,12 +1,17 @@
 """Venti package for calibrating OPERA DISP with GNSS."""
 
-import sys
 from typing import Any
 
 # Lazy imports to avoid pyproj initialization errors
 _LAZY_MODULES = {
     "models": ".models",
     "unwrap": ".unwrap",
+    "workflow": ".workflow",
+    "gnss": ".gnss",
+    "io": ".io",
+    "interpolation": ".interpolation",
+    "raster": ".raster",
+    "spatial": ".spatial",
 }
 
 
@@ -23,11 +28,12 @@ def __getattr__(name: str) -> Any:
     if name == "__version__":
         try:
             from ._version import __version__
-        except ImportError:
-            __version__ = "unknown"
-        else:
+
             globals()["__version__"] = __version__
-        return __version__
+        except ImportError:
+            return "unknown"
+        else:
+            return __version__
 
     msg = f"module {__name__!r} has no attribute {name!r}"
     raise AttributeError(msg)
@@ -38,4 +44,10 @@ def __dir__():
     return [*list(_LAZY_MODULES.keys()), "__version__"]
 
 
-__all__ = ["__version__", "models", "unwrap"]
+__all__ = [
+    "__version__",
+    "io",
+    "models",
+    "unwrap",
+    "workflow",
+]  # , 'gnss', 'interpolation', 'raster', 'spatial']

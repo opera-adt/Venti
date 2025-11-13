@@ -50,7 +50,7 @@ Changelog = "https://github.com/opera-adt/Venti/releases"
 
 # Entry points for the command line interface
 [project.scripts]
-venti = "venti.cli:cli"
+venti = "venti.__main__:main"
 
 
 [tool.pixi.project]
@@ -186,7 +186,7 @@ preview = true
 [tool.mypy]
 python_version = "3.11"
 ignore_missing_imports = true
-plugins = ["pandera.mypy"]
+plugins = []
 
 
 [tool.pytest.ini_options]

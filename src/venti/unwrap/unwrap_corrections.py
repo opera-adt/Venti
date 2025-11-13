@@ -11,18 +11,13 @@ from pathlib import Path
 
 import numba
 import numpy as np
-import xarray as xr
 from scipy import ndimage as ndi
 from skimage import filters, measure, segmentation
 
-# Optional imports for GeoTIFF support
+# Optional imports for type hints
 try:
-    import rasterio as rio
     from rasterio.transform import Affine
-
-    HAS_RASTERIO = True
 except ImportError:
-    HAS_RASTERIO = False
     Affine = None
 
 # Set up logger
@@ -102,8 +97,9 @@ class UnwrapCorrector:
         corrector = UnwrapCorrector()
         corrected = corrector.correct(disp, mask)
         info = corrector.get_region_info()
-        print(f"Corrected {info['n_regions']} regions with cycles: "
-              f"{info['unwrap_cycles']}")
+        n_regions = info['n_regions']
+        cycles = info['unwrap_cycles']
+        print(f"Corrected {n_regions} regions with cycles: {cycles}")
 
     Correct phase data (radians)::
 
@@ -121,14 +117,14 @@ class UnwrapCorrector:
             Minimum area (in pixels) for valid regions, by default 20
         wavelength : float, optional
             The wavelength value for unwrap correction
-                (default is 0.0555m for Sentinel-1).
+            (default is 0.0555m for Sentinel-1).
             For phase in radians, use 2π. Common values:
             - Sentinel-1 (C-band): 0.0555 m
             - ALOS-2 (L-band): 0.236 m
 
         """
-        self.min_region_area: int = min_region_area
-        self.wavelength: float = wavelength
+        self.min_region_area = min_region_area
+        self.wavelength = wavelength
         self.labeled_regions_: np.ndarray | None = None
         self.valid_labels_: np.ndarray | None = None
         self.medians_: np.ndarray | None = None
@@ -441,260 +437,27 @@ class UnwrapCorrector:
 
             corrector = UnwrapCorrector()
             corrected = corrector.correct(disp, mask)
-            corrector.save_geotiff(corrected, 'corrected.tif',
-                                   reference_file='input.tif')
+            corrector.save_geotiff(
+                corrected, 'corrected.tif', reference_file='input.tif'
+            )
 
         Or specify georeferencing manually::
 
-            corrector.save_geotiff(corrected, 'corrected.tif',
-                        transform=transform, crs='EPSG:4326')
+            corrector.save_geotiff(
+                corrected, 'corrected.tif', transform=transform, crs='EPSG:4326'
+            )
 
         """
-        if not HAS_RASTERIO:
-            msg = (
-                "rasterio is required for GeoTIFF output. "
-                "Install it with: pip install rasterio"
-            )
-            raise ImportError(msg)
+        from venti.io import write_geotiff
 
-        output_path = Path(output_path)
-
-        # Get georeferencing information
-        if reference_file is not None:
-            # Copy from reference file
-            with rio.open(reference_file) as src:
-                transform = src.transform
-                crs = src.crs
-                if nodata is None:
-                    nodata = src.nodata
-        elif transform is None or crs is None:
-            msg = "Either reference_file or both transform and crs must be provided"
-            raise ValueError(msg)
-
-        # Set default nodata if not specified
-        if nodata is None:
-            nodata = np.nan
-
-        # Handle masked arrays
-        if np.ma.isMaskedArray(corrected_disp):
-            data = corrected_disp.filled(nodata)
-        else:
-            data = corrected_disp
-
-        # Write GeoTIFF
-        with rio.open(
+        write_geotiff(
+            corrected_disp,
             output_path,
-            "w",
-            driver="GTiff",
-            height=data.shape[0],
-            width=data.shape[1],
-            count=1,
-            dtype=data.dtype,
-            crs=crs,
             transform=transform,
+            crs=crs,
             nodata=nodata,
-            compress="lzw",
-        ) as dst:
-            dst.write(data, 1)
-
-        logger.info(f"Saved corrected displacement to: {output_path}")
-
-
-def read_data(file: str | Path) -> np.ndarray:
-    """Read raster data from a file.
-
-    Parameters
-    ----------
-    file : str or Path
-        Path to the raster file
-
-    Returns
-    -------
-    np.ndarray
-        2D array containing the raster data
-
-    """
-    with rio.open(file) as temp_src:
-        data = temp_src.read(1)
-    return data
-
-
-def read_netcdf(
-    file: str | Path,
-    disp_variable: str = "displacement",
-    mask_variable: str = "water_mask",
-) -> tuple[np.ndarray, np.ndarray, dict]:
-    """Read displacement and mask data from a NetCDF file with georeferencing.
-
-    Parameters
-    ----------
-    file : str or Path
-        Path to the NetCDF file
-    disp_variable : str, optional
-        Displacement variable name, by default 'displacement'
-    mask_variable : str, optional
-        Mask variable name, by default 'water_mask'
-
-    Returns
-    -------
-    data : np.ndarray
-        2D displacement array
-    mask : np.ndarray
-        2D mask array
-    geo_info : dict
-        Dictionary containing georeferencing information:
-        - 'transform': rasterio Affine transform
-        - 'crs': Coordinate reference system
-        - 'nodata': NoData value if available
-
-    Raises
-    ------
-    ValueError
-        If the file cannot be read or lacks required variables/georeferencing
-    ImportError
-        If rasterio is required for georeferencing but not installed
-
-    """
-    if HAS_RASTERIO:
-        from rasterio.transform import from_bounds
-    else:
-        from_bounds = None
-
-    ds = xr.open_dataset(file)
-
-    # Read displacement variable
-    if disp_variable not in ds:
-        msg = f"Displacement variable '{disp_variable}' not found in {file}"
-        raise ValueError(msg)
-
-    data_array = ds[disp_variable]
-    data = data_array.values
-
-    # Squeeze out any singleton dimensions
-    data = np.squeeze(data)
-
-    if data.ndim != 2:
-        msg = f"Expected 2D displacement data, got {data.ndim}D"
-        raise ValueError(msg)
-
-    # Read mask variable
-    if mask_variable not in ds:
-        msg = f"Mask variable '{mask_variable}' not found in {file}"
-        raise ValueError(msg)
-
-    mask_array = ds[mask_variable]
-    mask = mask_array.values
-
-    # Squeeze out any singleton dimensions
-    mask = np.squeeze(mask)
-
-    if mask.ndim != 2:
-        msg = f"Expected 2D mask data, got {mask.ndim}D"
-        raise ValueError(msg)
-
-    # Check that mask and data have the same shape
-    if data.shape != mask.shape:
-        msg = f"Displacement and mask shapes do not match: {data.shape} vs {mask.shape}"
-        raise ValueError(msg)
-
-    # Extract georeferencing information
-    geo_info = {}
-
-    # Get CRS - try multiple sources
-    if "spatial_ref" in ds:
-        sr = ds["spatial_ref"]
-        # Try different CRS attribute names
-        for crs_attr in ["crs_wkt", "spatial_ref", "wkt"]:
-            if crs_attr in sr.attrs:
-                geo_info["crs"] = sr.attrs[crs_attr]
-                logger.debug(f"CRS from spatial_ref.{crs_attr}")
-                break
-        # If we found crs_wkt but want EPSG code, try to extract it
-        if "crs_wkt" in sr.attrs and "projected_crs_name" in sr.attrs:
-            logger.debug(f"Projected CRS: {sr.attrs['projected_crs_name']}")
-
-    if "crs" not in geo_info and "crs" in ds.attrs:
-        geo_info["crs"] = ds.attrs["crs"]
-        logger.debug("CRS from global attributes")
-
-    if "crs" not in geo_info:
-        # Try to infer from coordinate names
-        geo_info["crs"] = "EPSG:4326"  # Default assumption
-        logger.warning("No CRS found in NetCDF, assuming EPSG:4326")
-
-    # Get transform - check for GeoTransform first (GDAL-style)
-    if "spatial_ref" in ds and "GeoTransform" in ds["spatial_ref"].attrs:
-        if not HAS_RASTERIO:
-            logger.warning("rasterio not available, skipping transform extraction")
-        else:
-            # Parse GeoTransform string:
-            # "top_left_x pixel_width 0 top_left_y 0 -pixel_height"
-            gt_str = ds["spatial_ref"].attrs["GeoTransform"]
-            gt = [float(x) for x in gt_str.split()]
-            transform = Affine(gt[1], gt[2], gt[0], gt[4], gt[5], gt[3])
-            geo_info["transform"] = transform
-            logger.debug(f"Created transform from GeoTransform: {transform}")
-    elif "x" in ds.coords and "y" in ds.coords:
-        if not HAS_RASTERIO:
-            logger.warning("rasterio not available, skipping transform extraction")
-        else:
-            x = ds.coords["x"].values
-            y = ds.coords["y"].values
-
-            # Calculate pixel size
-            x_res = abs(x[1] - x[0]) if len(x) > 1 else 1.0
-            y_res = abs(y[1] - y[0]) if len(y) > 1 else 1.0
-
-            # Get bounds
-            x_min = float(x.min()) - x_res / 2
-            x_max = float(x.max()) + x_res / 2
-            y_min = float(y.min()) - y_res / 2
-            y_max = float(y.max()) + y_res / 2
-
-            # Create transform
-            transform = from_bounds(x_min, y_min, x_max, y_max, len(x), len(y))
-            geo_info["transform"] = transform
-            logger.debug(f"Created transform from x/y coordinates: {transform}")
-    elif "lon" in ds.coords and "lat" in ds.coords:
-        if not HAS_RASTERIO:
-            logger.warning("rasterio not available, skipping transform extraction")
-        else:
-            lon = ds.coords["lon"].values
-            lat = ds.coords["lat"].values
-
-            lon_res = abs(lon[1] - lon[0]) if lon.ndim == 1 and len(lon) > 1 else 1.0
-            lat_res = abs(lat[1] - lat[0]) if lat.ndim == 1 and len(lat) > 1 else 1.0
-
-            if lon.ndim == 1:
-                lon_min = float(lon.min()) - lon_res / 2
-                lon_max = float(lon.max()) + lon_res / 2
-                lat_min = float(lat.min()) - lat_res / 2
-                lat_max = float(lat.max()) + lat_res / 2
-
-                transform = from_bounds(
-                    lon_min, lat_min, lon_max, lat_max, len(lon), len(lat)
-                )
-                geo_info["transform"] = transform
-                logger.debug(f"Created transform from lon/lat coordinates: {transform}")
-    else:
-        available_coords = list(ds.coords.keys())
-        msg = (
-            "Could not find coordinate information (x/y or lon/lat) in NetCDF file. "
-            f"Available coordinates: {available_coords}"
+            reference_file=reference_file,
         )
-        raise ValueError(msg)
-
-    # Get nodata value
-    if hasattr(data_array, "_FillValue"):
-        geo_info["nodata"] = float(data_array._FillValue)
-    elif hasattr(data_array, "missing_value"):
-        geo_info["nodata"] = float(data_array.missing_value)
-    else:
-        geo_info["nodata"] = np.nan
-
-    ds.close()
-
-    return data, mask, geo_info
 
 
 def correct_region_offset(
@@ -788,10 +551,14 @@ def correct_region_offset(
     # Check if input is a file path
     geo_info = None
     if isinstance(input_disp, str | Path):
+        from venti.io import read_netcdf
+
         input_path = Path(input_disp)
         if input_path.suffix.lower() == ".nc":
             logger.info(f"Reading NetCDF file: {input_path}")
-            disp_data, mask_data, geo_info = read_netcdf(input_path)
+            disp_data, mask_data, geo_info = read_netcdf(
+                input_path, variable="displacement", mask_variable="water_mask"
+            )
             # Use mask from file if not provided
             if mask is None:
                 mask = mask_data
@@ -823,6 +590,8 @@ def correct_region_offset(
 
     # Save to GeoTIFF if output file is specified
     if output_file is not None:
+        from venti.io import write_geotiff
+
         if geo_info is None:
             msg = (
                 "Cannot save to GeoTIFF without georeferencing information. Provide"
@@ -845,7 +614,7 @@ def correct_region_offset(
             )
             raise ValueError(msg)
 
-        corrector.save_geotiff(
+        write_geotiff(
             corrected,
             output_file,
             transform=geo_info["transform"],
