@@ -1,0 +1,168 @@
+# Venti Algorithm Parameters
+# This file contains algorithm-specific settings with defaults that work for most locations.
+# These parameters typically don't change between runs.
+
+calibration_options:
+  # GNSS grid type: 'constant' uses velocity-based interpolation,
+  # 'variable' uses epoch-specific GNSS positions
+  # Type: string
+  # Options: ['constant', 'variable']
+  grid_type: constant
+
+  # GNSS reference frame to use
+  # Type: string
+  # Options: ['IGS14', 'IGS20']
+  reference_frame: IGS20
+
+  # Starting year for velocity estimation (for constant grid type)
+  # GNSS velocities will be computed from this year forward
+  # Type: number
+  starting_year: 2014.0
+
+  # Whether to correct islands for unwrap errors using watershed segmentation
+  # Helps fix phase discontinuities in unwrapped interferograms
+  # Type: boolean
+  unwrap_error_correction: true
+
+  # Window size for plane fitting in meters
+  # Larger windows smooth more but may miss local variations
+  # Typical values: 10000-50000
+  # Type: number
+  window_size_meters: 30000.0
+
+  # Input data posting (pixel spacing) in meters
+  # Used for coordinate transformations
+  # Type: number
+  posting_meters: 30.0
+
+  # Longwavelength filtering method for removing orbital/atmospheric signals
+  # Type: string
+  # Options: ['none', 'savitzky_golay', 'fft_gaussian', 'fft_butterworth', 'fft_ideal']
+  longwavelength_filter_method: none
+
+  # Cutoff wavelength in meters for longwavelength filtering
+  # Signals with wavelengths longer than this will be removed
+  # Typical values: 50000-200000 (50-200 km)
+  # Type: number
+  cutoff_wavelength_meters: 100000.0
+
+  # Moving window filter size in meters (for 'moving_window' method)
+  # Should be approximately equal to cutoff_wavelength_meters
+  # Type: number
+  moving_window_size_meters: 100000.0
+
+  # Savitzky-Golay filter parameters (for 'savitzky_golay' method)
+  savitzky_golay:
+    # Window length in pixels (must be odd)
+    # Type: integer
+    window_length: 51
+
+    # Polynomial order for fitting
+    # Lower order = smoother, higher order = preserves more detail
+    # Type: integer
+    polyorder: 3
+
+    # Derivative order (0 for smoothing, 1 for first derivative, etc.)
+    # Type: integer
+    deriv: 0
+
+  # FFT-based filter parameters (for 'fft_*' methods)
+  fft_filter:
+    # Gaussian filter standard deviation in wavelength units
+    # Only used for 'fft_gaussian' method
+    # Type: number
+    gaussian_sigma: 0.1
+
+    # Butterworth filter order (for 'fft_butterworth' method)
+    # Higher order = sharper cutoff, lower order = smoother transition
+    # Type: integer
+    butterworth_order: 4
+
+    # Apply filter in spatial domain vs frequency domain
+    # Type: boolean
+    spatial_domain: false
+
+    # Taper edges to reduce edge effects
+    # Type: boolean
+    taper_edges: true
+
+    # Taper width as fraction of image dimensions
+    # Type: number (0.0 to 0.5)
+    taper_width: 0.05
+
+decomposition_options:
+  # Method for least-squares inversion
+  # Type: string
+  # Options: ['weighted_least_squares', 'ridge', 'lasso']
+  inversion_method: weighted_least_squares
+
+  # Whether to compute and propagate uncertainties to output
+  # Type: boolean
+  uncertainty_propagation: true
+
+  # Minimum number of viewing geometries required for decomposition
+  # 2 or more geometries needed to solve for 3D displacement
+  # Type: integer
+  min_geometries: 2
+
+  # Only solve for vertical component (assume horizontal motion is zero)
+  # Useful when only one viewing geometry is available
+  # Type: boolean
+  vertical_only: false
+
+  # How to weight different viewing geometries in inversion
+  # Type: string
+  # Options: ['uniform', 'temporal_coherence', 'uncertainty']
+  geometry_weighting: temporal_coherence
+
+  # Minimum quality metric for including pixels in decomposition
+  # Pixels below this threshold will be masked out
+  # Type: number (0.0 to 1.0)
+  quality_threshold: 0.5
+
+processing_options:
+  # Downsample factor for performing operations at lower resolution
+  # Used by calibration (plane fitting) and decomposition (output grids)
+  # 1 means no downsampling, 2 means half resolution, etc.
+  # Higher values = faster processing but less detail
+  # Type: integer
+  cal_downsample_factor: 1
+
+  # Method for aggregating pixels during downsampling
+  # Used by both calibration and decomposition workflows
+  # Type: string
+  # Options: ['mean', 'median']
+  downsample_method: mean
+
+  # Whether to use weighted downsampling (based on coherence or quality)
+  # Used by both calibration and decomposition workflows
+  # Type: boolean
+  downsample_weighted: false
+
+  # Output grid posting in meters for decomposed ENU components
+  # Controls the resolution of output displacement grids
+  # If larger than input posting, data will be downsampled/aggregated
+  # Type: number
+  vlm_output_posting_meters: 120.0
+
+output_options:
+  # GDAL creation options for GeoTIFF output files
+  # These control compression, tiling, and other file properties
+  # Type: array of strings
+  gtiff_creation_options:
+    - COMPRESS=lzw
+    - ZLEVEL=4
+    - BIGTIFF=yes
+    - TILED=yes
+    - BLOCKXSIZE=128
+    - BLOCKYSIZE=128
+
+  # Whether to add overviews (pyramids) to output GeoTIFFs
+  # Overviews improve visualization performance but increase file size
+  # Type: boolean
+  add_overviews: false
+
+  # Compression method for output files
+  # Type: string
+  # Options: ['lzw', 'deflate', 'none']
+  compression: lzw

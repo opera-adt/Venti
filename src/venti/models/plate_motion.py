@@ -324,7 +324,7 @@ def calculate_euler_pole(
 
     # Statistical analysis
     chi2 = float(residuals.T @ P @ residuals)
-    # Deegres of freedom
+    # Degrees of freedom
     dof = 2 * n_sites - 3
     if dof <= 0:
         msg = f"Insufficient degrees of freedom: {dof}. Need at least 3 sites."
@@ -484,6 +484,8 @@ def model_plate_velocities(
 
     n_sites = len(longitude)
 
+    # Convert heights to array
+    heights_arr: np.ndarray
     if heights is None:
         heights_arr = np.zeros(n_sites)
     else:

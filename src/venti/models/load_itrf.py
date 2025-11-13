@@ -82,7 +82,6 @@ def load_itrf_pmm(filepath: str | Path | None = None, date: int = 2020) -> dict:
     except FileNotFoundError as e:
         msg = f"ITRF data file not found: {filepath}"
         raise FileNotFoundError(msg) from e
-
     except json.JSONDecodeError as e:
         msg = f"Invalid JSON in {filepath}: {e}"
         raise ValueError(msg) from e

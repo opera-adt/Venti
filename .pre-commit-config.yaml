@@ -30,14 +30,12 @@ repos:
     hooks:
       - id: ruff
         args: [--fix, --exit-non-zero-on-fix]
-        types_or: [python, jupyter]
+        types: [python]
 
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: "v1.16.0"
     hooks:
       - id: mypy
+        args: [--no-site-packages]
         additional_dependencies:
         - types-requests
-        - types-setuptools
-        - pandera
-        language_version: python3
