@@ -1,0 +1,238 @@
+"""GNSSReference: high-level interface for GNSS-based InSAR calibration data."""
+
+from __future__ import annotations
+
+import logging
+from dataclasses import dataclass, field
+from pathlib import Path
+
+import numpy as np
+
+from .los import InterpolationMethod, RbfFunction, project_to_los
+from .unr import (
+    calculate_station_velocity,
+    download_grid_lookup,
+    download_station,
+    find_stations_in_bounds,
+    read_epoch_displacements,
+)
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class GNSSReference:
+    """GNSS grid reference data for a geographic region.
+
+    Downloads UNR GNSS grid timeseries for stations within the specified
+    bounds and provides methods for projecting GNSS observations into the
+    InSAR line-of-sight (LOS) direction.
+
+    Parameters
+    ----------
+    bounds : tuple of float
+        Bounding box as ``(south, north, west, east)`` in the UTM CRS.
+    output_dir : Path
+        Directory for downloaded GNSS files.
+    reference_frame : str, optional
+        GNSS reference frame, ``'IGS20'`` or ``'IGS14'``, by default ``'IGS20'``.
+    utm_epsg : int or None, optional
+        EPSG code of the UTM projection. Required before calling
+        :meth:`download_stations`.
+
+    Attributes
+    ----------
+    station_files : list of Path
+        Paths to downloaded station files (set after :meth:`download_stations`).
+    station_gdf : gpd.GeoDataFrame or None
+        Filtered station GeoDataFrame in UTM CRS (set after :meth:`download_stations`).
+
+    Examples
+    --------
+    Download stations and compute a constant LOS velocity field::
+
+        gnss = GNSSReference(
+            bounds=(3800000, 3900000, 400000, 500000),
+            output_dir=Path('output/GNSS'),
+            utm_epsg=32611,
+        )
+        n = gnss.download_stations()
+        gnss_los = gnss.compute_velocity_los(
+            los_east, los_north, los_up, 'displacement.nc'
+        )
+
+    """
+
+    bounds: tuple[float, float, float, float]
+    output_dir: Path
+    reference_frame: str = "IGS20"
+    utm_epsg: int | None = None
+
+    station_files: list[Path] = field(default_factory=list, init=False)
+    station_gdf: object = field(default=None, init=False)  # gpd.GeoDataFrame | None
+
+    def download_stations(self) -> int:
+        """Download all GNSS stations within the configured bounds.
+
+        Returns
+        -------
+        int
+            Number of stations downloaded (or already cached).
+
+        Raises
+        ------
+        ValueError
+            If :attr:`utm_epsg` is not set.
+
+        """
+        if self.utm_epsg is None:
+            msg = "utm_epsg must be set before calling download_stations"
+            raise ValueError(msg)
+
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+
+        lookup_path = self.output_dir / "grid_latlon_lookup.txt"
+        if not lookup_path.exists():
+            lookup_path = download_grid_lookup(self.output_dir, self.reference_frame)
+
+        self.station_gdf = find_stations_in_bounds(
+            lookup_path, self.bounds, self.utm_epsg
+        )
+        logger.info("Found %d GNSS stations in bounds", len(self.station_gdf))
+
+        self.station_files = []
+        for station_id in self.station_gdf.index:
+            path = download_station(station_id, self.output_dir, self.reference_frame)
+            self.station_files.append(path)
+
+        logger.info("Downloaded %d station files", len(self.station_files))
+        return len(self.station_files)
+
+    def _build_velocity_gdf(self, start_year: float = 2014.0):
+        """Compute velocity GeoDataFrame for all stations.
+
+        Parameters
+        ----------
+        start_year : float, optional
+            Exclude observations before this decimal year, by default ``2014.0``.
+
+        Returns
+        -------
+        gpd.GeoDataFrame
+            Velocity GeoDataFrame with columns ``deast``, ``dnorth``, ``dup``,
+            ``dsigma_e``, ``dsigma_n``, ``dsigma_u``, and ``geometry``.
+
+        """
+        import geopandas as gpd
+        import pandas as pd
+
+        rows = []
+        for path in self.station_files:
+            station_id = int(path.name.split("_")[0])
+            ve, vn, vu, se, sn, su = calculate_station_velocity(path, start_year)
+            rows.append({
+                "id": station_id,
+                "deast": ve,
+                "dnorth": vn,
+                "dup": vu,
+                "dsigma_e": se,
+                "dsigma_n": sn,
+                "dsigma_u": su,
+            })
+
+        df = pd.DataFrame(rows).set_index("id")
+        return gpd.GeoDataFrame(df.join(self.station_gdf[["geometry"]], how="inner"))
+
+    def compute_velocity_los(
+        self,
+        los_east: np.ndarray,
+        los_north: np.ndarray,
+        los_up: np.ndarray,
+        netcdf_file: str | Path,
+        start_year: float = 2014.0,
+        method: InterpolationMethod = "rbf",
+        rbf_function: RbfFunction = "cubic",
+    ) -> np.ndarray:
+        """Compute GNSS velocity projected into the InSAR LOS direction.
+
+        Parameters
+        ----------
+        los_east : np.ndarray
+            2-D east LOS unit-vector component, shape ``(ny, nx)``.
+        los_north : np.ndarray
+            2-D north LOS unit-vector component.
+        los_up : np.ndarray
+            2-D up LOS unit-vector component.
+        netcdf_file : str or Path
+            NetCDF file defining the output raster grid.
+        start_year : float, optional
+            Earliest observation year used in velocity estimation, by default ``2014.0``.
+        method : {'rbf', 'griddata'}, optional
+            Spatial interpolation method, by default ``'rbf'``.
+        rbf_function : str, optional
+            RBF basis function when ``method='rbf'``, by default ``'cubic'``.
+
+        Returns
+        -------
+        np.ndarray
+            GNSS LOS velocity field, shape ``(ny, nx)``, same units as the
+            station files (typically m/yr).
+
+        """
+        assert self.station_files, "Call download_stations() first"  # noqa: S101
+        velocity_gdf = self._build_velocity_gdf(start_year)
+        return project_to_los(
+            los_east, los_north, los_up,
+            netcdf_file, velocity_gdf,
+            method=method, rbf_function=rbf_function,
+        )
+
+    def compute_displacement_los(
+        self,
+        ref_date: float,
+        sec_date: float,
+        los_east: np.ndarray,
+        los_north: np.ndarray,
+        los_up: np.ndarray,
+        netcdf_file: str | Path,
+        method: InterpolationMethod = "rbf",
+        rbf_function: RbfFunction = "cubic",
+    ) -> np.ndarray:
+        """Compute epoch-specific GNSS displacement projected into LOS.
+
+        Parameters
+        ----------
+        ref_date : float
+            Reference epoch as decimal year.
+        sec_date : float
+            Secondary epoch as decimal year.
+        los_east : np.ndarray
+            2-D east LOS unit-vector component.
+        los_north : np.ndarray
+            2-D north LOS unit-vector component.
+        los_up : np.ndarray
+            2-D up LOS unit-vector component.
+        netcdf_file : str or Path
+            NetCDF file defining the output raster grid.
+        method : {'rbf', 'griddata'}, optional
+            Spatial interpolation method, by default ``'rbf'``.
+        rbf_function : str, optional
+            RBF basis function when ``method='rbf'``, by default ``'cubic'``.
+
+        Returns
+        -------
+        np.ndarray
+            GNSS LOS displacement field, shape ``(ny, nx)``.
+
+        """
+        assert self.station_files, "Call download_stations() first"  # noqa: S101
+        assert self.station_gdf is not None, "Call download_stations() first"  # noqa: S101
+
+        disp_gdf = read_epoch_displacements(
+            self.station_files, ref_date, sec_date, self.station_gdf
+        )
+        return project_to_los(
+            los_east, los_north, los_up,
+            netcdf_file, disp_gdf,
+            method=method, rbf_function=rbf_function,
+        )

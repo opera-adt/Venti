@@ -35,6 +35,13 @@ dependencies = [
   "geopandas",
   "pyproj>=3.3",
   "psutil",
+  "tqdm",
+  "scikit-image",
+  "joblib",
+  "shapely",
+  "opera-utils",
+  "numba",
+  "netcdf4",
 ]
 
 # The version will be written into a version.py upon install, auto-generated
@@ -73,7 +80,14 @@ scipy = "*"
 geopandas = "*"
 pyproj = ">=3.3"
 psutil = "*"
-tyro= ">=0.9.24"
+tyro = ">=0.9.24"
+tqdm = "*"
+scikit-image = "*"
+joblib = "*"
+shapely = "*"
+opera-utils = "*"
+numba = "*"
+netcdf4 = "*"
 
 [tool.pixi.tasks]
 check = "pre-commit run -a"
@@ -93,6 +107,7 @@ pytest-xdist = "*"
 ruff = "*"
 matplotlib = ">=3.10.3"
 ipython = ">=9.3.0"
+ipykernel = "*"
 lxml = "*"
 ipdb = "*"
 contextily = "*"
