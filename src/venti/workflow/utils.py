@@ -89,21 +89,22 @@ def datetime_to_decimal_year(dt: datetime) -> float:
 
 def match_correction_to_displacement(
     correction_files: list[Path] | None, displacement_files: list[Path]
-) -> list[tuple[str | Path, Path]]:
+) -> list[tuple[Path | None, Path]]:
     """Match correction files to displacement files by date.
 
     Parameters
     ----------
     correction_files : list of Path or None
-        List of correction files (e.g., tropospheric corrections)
-        If None, returns matches with "None" for corrections
+        List of correction files (e.g., tropospheric corrections).
+        If ``None``, returns pairs with ``None`` for the correction file.
     displacement_files : list of Path
         List of displacement files
 
     Returns
     -------
     list of tuple
-        List of (correction_file, displacement_file) pairs
+        List of ``(correction_file, displacement_file)`` pairs where
+        ``correction_file`` is ``None`` when no corrections are available.
 
     Examples
     --------
@@ -119,12 +120,12 @@ def match_correction_to_displacement(
         corr_dict = {extract_dates_from_filename(f): f for f in correction_files}
     disp_dict = {extract_dates_from_filename(f): f for f in displacement_files}
 
-    matches: list[tuple[str | Path, Path]] = []
+    matches: list[tuple[Path | None, Path]] = []
 
-    # If no corrections, pair with "None"
+    # If no corrections, pair with None
     if correction_files is None:
         for _dates, disp_file in disp_dict.items():
-            matches.append(("None", disp_file))
+            matches.append((None, disp_file))
         return matches
 
     # Match by dates

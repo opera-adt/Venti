@@ -28,7 +28,6 @@ class SpatialProcessor:
         surface = processor.fit_windowed_surface(
             insar_data=disp_mm,
             gnss_los=gnss_los_mm,
-            bounds=(3800000, 3900000, 400000, 500000),
             window_size_x=1000,
             window_size_y=1000,
             window_overlap_x=10,
@@ -43,7 +42,6 @@ class SpatialProcessor:
         self,
         insar_data: np.ndarray,
         gnss_los: np.ndarray,
-        bounds: tuple[float, float, float, float],
         window_size_x: int,
         window_size_y: int,
         window_overlap_x: int = 10,
@@ -66,9 +64,6 @@ class SpatialProcessor:
             2-D InSAR displacement or velocity array.
         gnss_los : np.ndarray
             2-D GNSS LOS reference field (same shape as `insar_data`).
-        bounds : tuple of float
-            Geographic bounds as ``(south, north, west, east)`` used to build
-            the coordinate grid for polynomial fitting.
         window_size_x : int
             Window width in pixels.
         window_size_y : int
@@ -110,7 +105,6 @@ class SpatialProcessor:
             win_overlap_y=window_overlap_y,
             win_extend_x=win_extend_x,
             win_extend_y=win_extend_y,
-            snwe=bounds,
             gnss_los_std=gnss_los_std,
             poly_order=poly_order,
             n_jobs=n_jobs,

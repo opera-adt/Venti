@@ -577,9 +577,6 @@ class CalibrationWorkflow:
 
         # Process each file
         for tropo_file, disp_file in tqdm(self.matched_files, desc="Calibrating"):
-            # Handle "None" string from match_correction_to_displacement
-            tropo_path = None if tropo_file == "None" else Path(tropo_file)
-
             output_file = self.process_displacement_file(
                 disp_file,
                 los_east,
@@ -590,7 +587,7 @@ class CalibrationWorkflow:
                 window_size_pixels,
                 window_size_pixels,
                 bounds,
-                tropo_file=tropo_path,
+                tropo_file=tropo_file,
             )
 
             if output_file:

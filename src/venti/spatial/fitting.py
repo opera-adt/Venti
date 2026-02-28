@@ -8,6 +8,8 @@ Ported and cleaned up from the ``calibrate_velocity`` script.
 from __future__ import annotations
 
 import logging
+import shutil
+import tempfile
 
 import numpy as np
 import scipy.linalg
@@ -479,30 +481,39 @@ def _fit_plane(
         Propagated uncertainty of the fit.
 
     """
-    nan_idx = np.isnan(data.ravel())
-
     if smooth:
         data = gaussian(data, smooth_sigma)
 
-    A = _design_matrix_poly(lons.ravel(), lats.ravel(), poly_order=order)
-    A_clean = np.delete(A, nan_idx, axis=0)
-    b_clean = np.delete(data.ravel(), nan_idx)
-    w = np.ones_like(b_clean)
+    # Decimate in 2D before building any arrays.  Using [::d] on a raveled
+    # 1-D array steps columns only ([::1, ::d]), not a 2-D spatial grid
+    # ([::d, ::d]), and forces construction of an (N_pixels, n_coeff) design
+    # matrix before any reduction — O(N) memory per window per worker.
+    # 2-D decimation first reduces both memory and compute by decimate^2.
+    data_sub = data[::decimate, ::decimate]
+    lons_sub = lons[::decimate, ::decimate]
+    lats_sub = lats[::decimate, ::decimate]
 
-    _, _, _, Qxx, res, *_ = _weighted_lscov(
-        A_clean[::decimate], b_clean[::decimate], w[::decimate]
+    valid = ~np.isnan(data_sub.ravel())
+    n_coeff = _POLY_N_COEFF[order]
+    if valid.sum() < n_coeff:
+        return np.zeros_like(data), np.zeros_like(data)
+
+    A = _design_matrix_poly(lons_sub.ravel()[valid], lats_sub.ravel()[valid], poly_order=order)
+    b = data_sub.ravel()[valid]
+    w = np.ones_like(b)
+
+    _, _, _, Qxx, res, *_ = _weighted_lscov(A, b, w)
+
+    # Remove 2-sigma outliers and refit.  All index operations stay within
+    # the decimated subset, so the boolean mask is consistent with A and b.
+    res_flat = res.ravel()
+    inliers = (res_flat >= res_flat.mean() - 2 * res_flat.std()) & (
+        res_flat <= res_flat.mean() + 2 * res_flat.std()
     )
-
-    # Remove 2-sigma outliers and refit
-    res = res.ravel()
-    outliers = (res < res.mean() - 2 * res.std()) | (res > res.mean() + 2 * res.std())
-    A_ref = np.delete(A_clean, np.where(outliers), axis=0)
-    b_ref = np.delete(b_clean, np.where(outliers))
-    w_ref = np.ones_like(b_ref)
-
-    x1, _, _, Qxx, *_ = _weighted_lscov(
-        A_ref[::decimate], b_ref[::decimate], w_ref[::decimate]
-    )
+    if inliers.sum() >= n_coeff:
+        x1, _, _, Qxx, *_ = _weighted_lscov(A[inliers], b[inliers], w[inliers])
+    else:
+        x1, _, _, Qxx, *_ = _weighted_lscov(A, b, w)
 
     plane = _calc_plane_values(lons, lats, x1.ravel(), order)
     _, plane_std = _calc_plane_uncertainty(lons, lats, Qxx, order)
@@ -542,37 +553,42 @@ def _get_residual_mask(
 
 
 def _get_coordinate_grid(
-    snwe: tuple[float, float, float, float],
     win_y: list[int],
     win_x: list[int],
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Build a coordinate meshgrid for a window region.
+    """Build a normalised coordinate meshgrid for a window region.
+
+    Coordinates are expressed as normalised values in ``[-1, 1]`` relative to
+    the window extent rather than in absolute geographic or projected units.
+    This keeps the polynomial design matrix well-conditioned regardless of
+    whether the bounds are in lat/lon degrees or UTM metres.
 
     Parameters
     ----------
-    snwe : tuple of float
-        ``(south, north, west, east)`` bounds.
     win_y : list of int
-        ``[y_start, y_stop]`` pixel row indices.
+        ``[y_start, y_stop]`` pixel row indices of the window.
     win_x : list of int
-        ``[x_start, x_stop]`` pixel column indices.
+        ``[x_start, x_stop]`` pixel column indices of the window.
 
     Returns
     -------
-    grid_lons : np.ndarray
-    grid_lats : np.ndarray
+    grid_x : np.ndarray
+        Normalised x (column) coordinates, shape ``(ny, nx)``, range ``[-1, 1]``.
+    grid_y : np.ndarray
+        Normalised y (row) coordinates, shape ``(ny, nx)``, range ``[-1, 1]``.
 
     """
-    lons = np.linspace(snwe[2], snwe[3], win_x[1] - win_x[0])
-    lats = np.linspace(snwe[1], snwe[0], win_y[1] - win_y[0])
-    return np.meshgrid(lons, lats)
+    nx = win_x[1] - win_x[0]
+    ny = win_y[1] - win_y[0]
+    xs = np.linspace(-1.0, 1.0, nx)
+    ys = np.linspace(-1.0, 1.0, ny)
+    return np.meshgrid(xs, ys)
 
 
 def _process_window(
     win_index: tuple[slice, slice],
     insar_data: np.ndarray,
     gnss_los: np.ndarray,
-    snwe: tuple[float, float, float, float],
     win_extend_y: int,
     win_extend_x: int,
     length: int,
@@ -591,8 +607,6 @@ def _process_window(
         Full InSAR data array (gap-filled, masked).
     gnss_los : np.ndarray
         Full GNSS LOS reference array.
-    snwe : tuple of float
-        Geographic bounds ``(south, north, west, east)``.
     win_extend_y : int
         Row extension for fitting context.
     win_extend_x : int
@@ -616,7 +630,7 @@ def _process_window(
     )
     win_y = [win2[0].start, win2[0].stop]
     win_x = [win2[1].start, win2[1].stop]
-    win_lons, win_lats = _get_coordinate_grid(snwe, win_y=win_y, win_x=win_x)
+    win_lons, win_lats = _get_coordinate_grid(win_y=win_y, win_x=win_x)
 
     res = insar_data[win2] - gnss_los[win2]
     if np.isnan(res).sum() / res.size > 0.8:
@@ -642,7 +656,6 @@ def fit_windowed_plane(
     win_overlap_y: int,
     win_extend_x: int,
     win_extend_y: int,
-    snwe: tuple[float, float, float, float],
     gnss_los_std: np.ndarray | None = None,
     poly_order: float = 1.5,
     n_jobs: int = -1,
@@ -671,9 +684,6 @@ def fit_windowed_plane(
         Extension beyond the window for fitting context.
     win_extend_y : int
         Extension beyond the window for fitting context.
-    snwe : tuple of float
-        Geographic bounds ``(south, north, west, east)`` used to build the
-        coordinate grid for polynomial fitting.
     gnss_los_std : np.ndarray, optional
         Uncertainty of the GNSS LOS field (reserved for future weighted
         inversion; currently unused).
@@ -700,7 +710,6 @@ def fit_windowed_plane(
             win_xsize=1000, win_ysize=1000,
             win_overlap_x=10, win_overlap_y=10,
             win_extend_x=1000, win_extend_y=1000,
-            snwe=(3800000, 3900000, 400000, 500000),
         )
         calibrated = displacement_mm - surface
 
@@ -714,10 +723,14 @@ def fit_windowed_plane(
         win_ysize, win_xsize, poly_order,
     )
 
-    # Gap-fill before fitting
+    # Gap-fill before fitting, then restore NaN at originally-invalid pixels.
+    # Keeping a plain ndarray (not a masked array) ensures scipy/numpy linear
+    # algebra routines in _fit_plane receive plain arrays and handle NaN
+    # exclusion correctly via nan_idx rather than silently operating on masked
+    # fill values.
     insar_filled = np.ma.masked_array(insar_data, mask=outlier_mask).filled(0)
     insar_filled = _fill_gaps(insar_filled, fill_value=0, smoothing_iterations=10)
-    insar_filled = np.ma.masked_array(insar_filled, invalid_mask)
+    insar_filled = np.where(invalid_mask, np.nan, insar_filled)
 
     # Build window index list
     y_start, y_stop = _find_data_extent(insar_data, axis=1)
@@ -733,13 +746,39 @@ def fit_windowed_plane(
 
     logger.info("Processing %d windows (n_jobs=%d)", len(all_windows), n_jobs)
 
-    results = Parallel(n_jobs=n_jobs)(
-        delayed(_process_window)(
-            ix, insar_filled, gnss_los, snwe,
-            win_extend_y, win_extend_x, length, width, poly_order,
+    # Write large arrays to memory-mapped files so that joblib workers share
+    # OS pages rather than serializing full copies of each array per process.
+    _tmpdir = tempfile.mkdtemp(prefix="venti_fit_")
+    try:
+        _insar_path = f"{_tmpdir}/insar.mmap"
+        _gnss_path = f"{_tmpdir}/gnss.mmap"
+
+        _insar_mm = np.memmap(
+            _insar_path, dtype=insar_filled.dtype, mode="w+", shape=insar_filled.shape
         )
-        for ix in all_windows
-    )
+        _gnss_mm = np.memmap(
+            _gnss_path, dtype=gnss_los.dtype, mode="w+", shape=gnss_los.shape
+        )
+        _insar_mm[:] = insar_filled
+        _gnss_mm[:] = gnss_los
+        del _insar_mm, _gnss_mm  # flush writes; reopen read-only below
+
+        _insar_mm = np.memmap(
+            _insar_path, dtype=insar_filled.dtype, mode="r", shape=insar_filled.shape
+        )
+        _gnss_mm = np.memmap(
+            _gnss_path, dtype=gnss_los.dtype, mode="r", shape=gnss_los.shape
+        )
+
+        results = Parallel(n_jobs=n_jobs)(
+            delayed(_process_window)(
+                ix, _insar_mm, _gnss_mm,
+                win_extend_y, win_extend_x, length, width, poly_order,
+            )
+            for ix in all_windows
+        )
+    finally:
+        shutil.rmtree(_tmpdir, ignore_errors=True)
 
     cal_surface = np.zeros(insar_data.shape, dtype=np.float32)
     cal_std = np.zeros(insar_data.shape, dtype=np.float32)
