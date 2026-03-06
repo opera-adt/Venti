@@ -175,8 +175,7 @@ class GNSSReference:
         Returns
         -------
         np.ndarray
-            GNSS LOS velocity field, shape ``(ny, nx)``, same units as the
-            station files (typically m/yr).
+            GNSS LOS velocity field, shape ``(ny, nx)``, in mm/yr.
 
         """
         assert self.station_files, "Call download_stations() first"  # noqa: S101

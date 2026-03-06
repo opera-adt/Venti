@@ -190,7 +190,7 @@ def calculate_station_velocity(
     -------
     tuple of float
         ``(ve, vn, vu, sigma_ve, sigma_vn, sigma_vu)`` — velocities and their
-        standard errors in the same units as the station file (typically m/yr).
+        standard errors in the same units as the station file (mm/yr).
 
     """
     data = np.loadtxt(station_file)
@@ -266,12 +266,12 @@ def read_epoch_displacements(
 
         rows.append({
             "id": station_id,
-            "deast": ref_row["east"] - sec_row["east"],
-            "dnorth": ref_row["north"] - sec_row["north"],
-            "dup": ref_row["up"] - sec_row["up"],
-            "dsigma_e": ref_row["sigma_e"] - sec_row["sigma_e"],
-            "dsigma_n": ref_row["sigma_n"] - sec_row["sigma_n"],
-            "dsigma_u": ref_row["sigma_u"] - sec_row["sigma_u"],
+            "deast": sec_row["east"] - ref_row["east"],
+            "dnorth": sec_row["north"] - ref_row["north"],
+            "dup": sec_row["up"] - ref_row["up"],
+            "dsigma_e": np.hypot(ref_row["sigma_e"], sec_row["sigma_e"]),
+            "dsigma_n": np.hypot(ref_row["sigma_n"], sec_row["sigma_n"]),
+            "dsigma_u": np.hypot(ref_row["sigma_u"], sec_row["sigma_u"]),
         })
 
     diff_df = pd.DataFrame(rows).set_index("id")
