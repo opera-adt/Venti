@@ -165,6 +165,12 @@ class CalibrationOptions(BaseModel):
             "Whether to correct islands for unwrap errors using watershed segmentation"
         ),
     )
+    recompute_gnss: bool = Field(
+        True,
+        description=(
+            "Recompute GNSS LOS interpolation even if a cached file already exists"
+        ),
+    )
     window_size_meters: float = Field(
         30000.0, gt=0, description="Window size for plane fitting in meters"
     )
@@ -908,6 +914,11 @@ class VentiConfig(BaseModel):
             def posting_meters(self):
                 cal_opts = self.config.algorithm_parameters.calibration_options
                 return cal_opts.posting_meters
+
+            @property
+            def recompute_gnss(self):
+                cal_opts = self.config.algorithm_parameters.calibration_options
+                return cal_opts.recompute_gnss
 
             @property
             def output_posting_meters(self):

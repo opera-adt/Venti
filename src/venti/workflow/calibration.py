@@ -24,6 +24,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Half-wavelength for Sentinel-1 C-band in mm: λ/2 = 0.0555/2 * 1000
+_WAVELENGTH_MM: float = 0.0555 / 2 * 1000
+
 
 @dataclass
 class CalibrationState:
@@ -109,7 +112,7 @@ class CalibrationWorkflow:
         # same for functions imported from utils, mainly downsample and upsample
 
         # Create output directory
-        self.config.input_options.work_directory.mkdir(parents=True, exist_ok=True)
+        self.config.run_config.product_path_group.product_path.mkdir(parents=True, exist_ok=True)
 
         # Initialize components
         self.io_reader = RasterReader()
@@ -148,19 +151,13 @@ class CalibrationWorkflow:
         bounds = self.io_reader.get_bounds(disp_files[0], as_latlon=False)
 
         # Get UTM EPSG
+        from pyproj import CRS
+
         netcdf_data = self.io_reader.read_netcdf(disp_files[0])
-        utm_crs = netcdf_data.crs
-
-        if hasattr(utm_crs, "to_epsg"):
-            utm_epsg = utm_crs.to_epsg()
-        else:
-            import re
-
-            match = re.search(r"EPSG:(\d+)", str(utm_crs))
-            utm_epsg = int(match.group(1)) if match else None
+        utm_epsg = CRS.from_user_input(netcdf_data.crs).to_epsg()
 
         # Initialize GNSS reference
-        gnss_dir = self.config.input_options.work_directory / "GNSS"
+        gnss_dir = self.config.run_config.product_path_group.product_path / "GNSS"
         self.gnss_manager = GNSSReference(
             bounds=bounds,
             output_dir=gnss_dir,
@@ -235,20 +232,15 @@ class CalibrationWorkflow:
         disp_files = sorted(self.config.input_options.input_files.glob("*.nc"))
         coherence_file = compute_average_temporal_coherence(
             disp_files,
-            self.config.input_options.work_directory,
+            self.config.run_config.product_path_group.product_path,
             variable="temporal_coherence",
         )
 
-        try:
-            from opera_utils.disp import rebase_reference
+        from opera_utils.disp import rebase_reference
 
-            ref_point = rebase_reference.find_reference_point(coherence_file)
-        except Exception as e:
-            logger.warning(f"Auto-selection failed: {e}, using center")
-            return (mask.shape[0] // 2, mask.shape[1] // 2)
-        else:
-            logger.info(f"Auto-selected reference point: {ref_point}")
-            return ref_point
+        ref_point = rebase_reference.find_reference_point(coherence_file)
+        logger.info(f"Auto-selected reference point: {ref_point}")
+        return ref_point
 
     def compute_gnss_reference(
         self,
@@ -284,38 +276,58 @@ class CalibrationWorkflow:
         """
         assert self.gnss_manager is not None, "gnss_manager not initialized"
 
-        if self.config.grid_settings.grid_type == "constant":
-            # Use velocities
-            if not hasattr(self, "_gnss_velocity"):
-                logger.info(
-                    "Computing GNSS velocities from"
-                    f" {self.config.grid_settings.starting_year}"
-                )
-                gnss_velocities = self.gnss_manager.compute_velocities(
-                    start_year=self.config.grid_settings.starting_year
-                )
-                gnss_los = gnss_velocities.project_to_los(
-                    los_east, los_north, los_up, disp_file, method="rbf"
-                )
-                self._gnss_velocity = gnss_los
+        output_dir = self.config.run_config.product_path_group.product_path
+        recompute = self.config.grid_settings.recompute_gnss
 
-            # Scale by time span
-            if ref_date and sec_date:
-                time_span = ref_date - sec_date
-                return self._gnss_velocity * time_span
-            else:
+        if self.config.grid_settings.grid_type == "constant":
+            if not hasattr(self, "_gnss_velocity"):
+                cache_file = output_dir / "gnss_los_velocity.npy"
+                if cache_file.exists() and not recompute:
+                    logger.info(f"Loading cached GNSS LOS velocity from {cache_file}")
+                    self._gnss_velocity = np.load(cache_file)
+                else:
+                    logger.info(
+                        "Computing GNSS LOS velocity from"
+                        f" {self.config.grid_settings.starting_year}"
+                    )
+                    self._gnss_velocity = self.gnss_manager.compute_velocity_los(
+                        los_east=los_east,
+                        los_north=los_north,
+                        los_up=los_up,
+                        netcdf_file=disp_file,
+                        start_year=self.config.grid_settings.starting_year,
+                        method="rbf",
+                    )
+                    np.save(cache_file, self._gnss_velocity)
+                    logger.info(f"Saved GNSS LOS velocity to {cache_file}")
+
+            if ref_date is None or sec_date is None:
                 return self._gnss_velocity
+            # sec_date > ref_date (OPERA convention), so (sec_date - ref_date) > 0.
+            return self._gnss_velocity * (sec_date - ref_date)
 
         else:
-            # Compute epoch-specific displacement
             if ref_date is None or sec_date is None:
                 msg = "ref_date and sec_date required for variable grid type"
                 raise ValueError(msg)
 
-            gnss_disp = self.gnss_manager.compute_displacement(ref_date, sec_date)
-            return gnss_disp.project_to_los(
-                los_east, los_north, los_up, disp_file, method="rbf"
+            cache_file = output_dir / f"gnss_los_disp_{ref_date:.4f}_{sec_date:.4f}.npy"
+            if cache_file.exists() and not recompute:
+                logger.info(f"Loading cached GNSS LOS displacement from {cache_file}")
+                return np.load(cache_file)
+
+            result = self.gnss_manager.compute_displacement_los(
+                ref_date=ref_date,
+                sec_date=sec_date,
+                los_east=los_east,
+                los_north=los_north,
+                los_up=los_up,
+                netcdf_file=disp_file,
+                method="rbf",
             )
+            np.save(cache_file, result)
+            logger.info(f"Saved GNSS LOS displacement to {cache_file}")
+            return result
 
     def process_displacement_file(
         self,
@@ -327,7 +339,6 @@ class CalibrationWorkflow:
         ref_point: tuple[int, int],
         window_size_x: int,
         window_size_y: int,
-        bounds: tuple,
         tropo_file: Path | None = None,
     ) -> Path | None:
         """Process a single displacement file.
@@ -350,8 +361,6 @@ class CalibrationWorkflow:
             Window width
         window_size_y : int
             Window height
-        bounds : tuple
-            Geographic bounds
         tropo_file : Path, optional
             Tropospheric correction file path
 
@@ -399,9 +408,15 @@ class CalibrationWorkflow:
         # Apply mask
         disp = np.where(mask & ~np.isnan(disp), disp, np.nan)
 
-        # Correct unwrap errors
-        logger.debug("Correcting unwrap errors...")
-        disp = correct_region_offset(disp, gnss_los, mask)
+        # Correct unwrap errors (optional)
+        apply_unwrap_correction = (
+            self.config.algorithm_parameters.calibration_options.unwrap_error_correction
+        )
+        if apply_unwrap_correction:
+            logger.debug("Correcting unwrap errors...")
+            disp = correct_region_offset(
+                input_disp=disp, mask=mask, wavelength=_WAVELENGTH_MM
+            )
 
         if isinstance(disp, np.ma.MaskedArray):
             disp = disp.filled(np.nan)
@@ -463,14 +478,13 @@ class CalibrationWorkflow:
         # Fit calibration surface
         logger.debug("Fitting calibration surface...")
         calibration_surface = self.spatial_processor.fit_windowed_surface(
-            disp_ds,
-            gnss_los_ds,
-            bounds=bounds,
+            insar_data=disp_ds,
+            gnss_los=gnss_los_ds,
             window_size_x=win_x_ds,
             window_size_y=win_y_ds,
             window_overlap_x=10,
             window_overlap_y=10,
-            poly_order=2,
+            poly_order=1.5,
             n_jobs=-1,
         )
 
@@ -490,13 +504,15 @@ class CalibrationWorkflow:
         grid_type = self.config.grid_settings.grid_type
         ref_frame = self.config.grid_settings.reference_frame.lower()
         suffix = f"_corrected_{grid_type}_{ref_frame}"
-        if tropo_file is not None:
-            suffix += "_tropo"
         if self.config.grid_settings.downsample_factor > 1:
             suffix += f"_downsample{self.config.grid_settings.downsample_factor}"
+        if tropo_file is not None:
+            suffix += "_tropo"
+        if not apply_unwrap_correction:
+            suffix += "_nowrap"
 
         output_file = (
-            self.config.input_options.work_directory / f"{disp_file.stem}{suffix}.tif"
+            self.config.run_config.product_path_group.product_path / f"{disp_file.stem}{suffix}.tif"
         )
 
         # Save
@@ -518,8 +534,14 @@ class CalibrationWorkflow:
         logger.debug(f"Saved: {output_file.name}")
         return output_file
 
-    def run(self) -> CalibrationState:
+    def run(self, max_files: int | None = None) -> CalibrationState:
         """Run the complete calibration workflow.
+
+        Parameters
+        ----------
+        max_files : int or None, optional
+            Processing only the first ``max_files`` displacement files.
+            Set the number of displacement files to calibrate. Default is None (process all files).
 
         Returns
         -------
@@ -544,6 +566,8 @@ class CalibrationWorkflow:
 
         # Get displacement files
         disp_files = sorted(self.config.input_options.input_files.glob("*.nc"))
+        if max_files is not None:
+            disp_files = disp_files[:max_files]
         self.state.n_files_total = len(disp_files)
 
         logger.info(f"Processing {self.state.n_files_total} displacement files")
@@ -572,9 +596,6 @@ class CalibrationWorkflow:
             self.config.grid_settings.posting_meters,
         )
 
-        # Get bounds
-        bounds = self.io_reader.get_bounds(disp_files[0], as_latlon=False)
-
         # Process each file
         for tropo_file, disp_file in tqdm(self.matched_files, desc="Calibrating"):
             output_file = self.process_displacement_file(
@@ -586,7 +607,6 @@ class CalibrationWorkflow:
                 ref_point,
                 window_size_pixels,
                 window_size_pixels,
-                bounds,
                 tropo_file=tropo_file,
             )
 
@@ -605,7 +625,7 @@ class CalibrationWorkflow:
         logger.info(f"Processed: {self.state.n_files_processed}")
         logger.info(f"Failed: {self.state.n_files_failed}")
         logger.info(f"Success rate: {self.state.success_rate:.1f}%")
-        logger.info(f"Output directory: {self.config.input_options.work_directory}")
+        logger.info(f"Output directory: {self.config.run_config.product_path_group.product_path}")
 
         return self.state
 

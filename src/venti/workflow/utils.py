@@ -341,41 +341,50 @@ def compute_average_temporal_coherence(
 
     logger.info(f"Computing average {variable} from {len(netcdf_files)} files")
 
-    # Read first file to get CRS
-    data_path = f"NETCDF:{netcdf_files[0]}:/{variable}"
-    try:
-        import rasterio as rio
+    # Extract CRS from xarray dataset directly
+    crs = None
+    with xr.open_dataset(netcdf_files[0]) as ds:
+        if "spatial_ref" in ds:
+            sr = ds["spatial_ref"]
+            for attr in ("crs_wkt", "spatial_ref", "wkt"):
+                if attr in sr.attrs:
+                    crs = sr.attrs[attr]
+                    break
+        elif "crs" in ds.attrs:
+            crs = ds.attrs["crs"]
 
-        with rio.open(data_path) as src:
-            crs = src.crs
-    except Exception:
-        crs = None
+    if crs is None:
         logger.warning("Could not extract CRS from NetCDF")
 
-    # Read and stack all files
-    data_arrays = []
+    # Compute incremental mean to avoid loading all files into memory at once
+    acc = None
+    count = 0
     for f in netcdf_files:
-        ds = xr.open_dataset(f)
-        if variable in ds:
-            data_arrays.append(ds[variable])
-        ds.close()
+        with xr.open_dataset(f) as ds:
+            if variable not in ds:
+                continue
+            data = ds[variable].values
+        if acc is None:
+            acc = data.astype("float64")
+        else:
+            acc += data
+        count += 1
 
-    if not data_arrays:
+    if acc is None or count == 0:
         msg = f"Variable '{variable}' not found in any files"
         raise ValueError(msg)
 
-    # Compute mean
-    stacked = xr.concat(data_arrays, dim="stack")
-    average = stacked.mean(dim="stack", skipna=True)
+    average_da = xr.DataArray(
+        (acc / count).astype("float32"),
+        dims=["y", "x"],
+    )
 
-    # Set CRS if available
     if crs is not None:
-        average = average.rio.write_crs(crs)
-        average.rio.set_spatial_dims(x_dim="x", y_dim="y", inplace=True)
+        average_da = average_da.rio.write_crs(crs)
+        average_da.rio.set_spatial_dims(x_dim="x", y_dim="y", inplace=True)
 
-    # Save to GeoTIFF
     output_dir.mkdir(parents=True, exist_ok=True)
-    average.rio.to_raster(output_file)
+    average_da.rio.to_raster(output_file)
 
     logger.info(f"Saved average {variable} to: {output_file}")
     return output_file

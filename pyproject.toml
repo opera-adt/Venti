@@ -7,7 +7,8 @@ name = "venti"
 authors = [
   { name = "Marin Govorcin", email = "marin.govorcin@jpl.nasa.gov" },
   { name = "Scott Staniewicz", email = "scott.j.staniewicz@jpl.nasa.gov" },
-  { name = "Sara Mirzaee", email = "sara.mirzaee@jpl.nasa.gov" }
+  { name = "Sara Mirzaee", email = "sara.mirzaee@jpl.nasa.gov" },
+  { name = "Talib Oliver-Cabrera", email = "talib.oliver.cabrera@jpl.nasa.gov" },
 ]
 description = "Calibrated OPERA DISP with GNSS and project to vertical direction"
 readme = { file = "README.md", content-type = "text/markdown" }
@@ -35,7 +36,10 @@ dependencies = [
   "geopandas",
   "pyproj>=3.3",
   "psutil",
+  "pydantic>=2.0",
+  "pyyaml",
   "tqdm",
+  "tyro>=0.9.24",
   "scikit-image",
   "joblib",
   "shapely",
@@ -80,6 +84,8 @@ scipy = "*"
 geopandas = "*"
 pyproj = ">=3.3"
 psutil = "*"
+pydantic = ">=2.0"
+pyyaml = "*"
 tyro = ">=0.9.24"
 tqdm = "*"
 scikit-image = "*"
