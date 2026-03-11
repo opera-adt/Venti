@@ -40,9 +40,9 @@ or install within your existing env with mamba.
 ```bash
 python -m pip install .
 ```
-editable mode
+or in editable mode:
 ```bash
-python -m pip install --n
+python -m pip install -e .
 ```
 
 ---

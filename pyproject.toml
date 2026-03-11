@@ -53,6 +53,19 @@ dependencies = [
 # https://setuptools.pypa.io/en/latest/userguide/pyproject_config.html#dynamic-metadata
 dynamic = ["version"]
 
+[project.optional-dependencies]
+test = [
+  "pytest",
+  "pytest-cov",
+  "pytest-randomly",
+  "pytest-recording>=0.13.2",
+  "pytest-xdist",
+  "pre-commit",
+  "ruff",
+  "matplotlib>=3.10.3",
+  "ipykernel",
+]
+
 [project.urls]
 Homepage = "https://github.com/opera-adt/Venti"
 "Bug Tracker" = "https://github.com/opera-adt/Venti/issues"
