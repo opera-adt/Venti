@@ -27,6 +27,7 @@ class Command(str, Enum):
 
     config = "config"
     run = "run"
+    run_single = "run-single"
 
 
 def config_command(output_dir: str = ".") -> None:
@@ -137,6 +138,71 @@ def run_command(config_file: str, log_level: str = "INFO") -> None:
         sys.exit(1)
 
 
+def run_single_command(
+    config_file: str,
+    disp_file: str,
+    tropo_file: str | None = None,
+    log_level: str = "INFO",
+) -> None:
+    """Calibrate a single displacement file.
+
+    Parameters
+    ----------
+    config_file : str
+        Path to YAML configuration file.
+    disp_file : str
+        Path to the NetCDF displacement file to calibrate.
+    tropo_file : str, optional
+        Path to a tropospheric correction GeoTIFF for this epoch.
+    log_level : str
+        Logging level (DEBUG, INFO, WARNING, ERROR), default: INFO.
+
+    Examples
+    --------
+    ::
+
+        venti run-single runconfig.yaml /data/disp/epoch_001.nc
+        venti run-single runconfig.yaml /data/disp/epoch_001.nc --tropo-file /data/tropo/tropo_001.tif
+        venti run-single runconfig.yaml /data/disp/epoch_001.nc --log-level DEBUG
+
+    """
+    from pathlib import Path
+
+    from .workflow.calibration import CalibrationWorkflow
+    from .workflow.config import load_config
+
+    numeric_level = getattr(logging, log_level.upper(), None)
+    if isinstance(numeric_level, int):
+        logging.getLogger().setLevel(numeric_level)
+
+    try:
+        logger.info(f"Loading configuration from: {config_file}")
+        config = load_config(config_file)
+
+        logger.info("Starting single-file calibration...")
+        workflow = CalibrationWorkflow(config=config)
+        state = workflow.run_single(
+            disp_file=Path(disp_file),
+            tropo_file=Path(tropo_file) if tropo_file is not None else None,
+        )
+
+        if state.n_files_failed:
+            logger.error("Calibration failed — check logs above.")
+            sys.exit(1)
+
+        logger.info(f"Output: {state.output_files[0]}")
+
+    except FileNotFoundError:
+        logger.exception("File not found")
+        sys.exit(1)
+    except ValueError:
+        logger.exception("Configuration error")
+        sys.exit(1)
+    except Exception:
+        logger.exception("Workflow failed")
+        sys.exit(1)
+
+
 def main() -> None:
     """Run the main CLI with subcommands."""
     # Use tyro for CLI parsing with subcommands
@@ -144,6 +210,7 @@ def main() -> None:
         {
             Command.config: config_command,
             Command.run: run_command,
+            Command.run_single: run_single_command,
         }
     )
 

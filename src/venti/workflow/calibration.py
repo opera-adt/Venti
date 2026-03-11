@@ -534,6 +534,78 @@ class CalibrationWorkflow:
         logger.debug(f"Saved: {output_file.name}")
         return output_file
 
+    def run_single(
+        self,
+        disp_file: Path,
+        tropo_file: Path | None = None,
+    ) -> CalibrationState:
+        """Run the calibration workflow on a single displacement file.
+
+        Performs the same setup as `run` (GNSS download, LOS/mask loading,
+        reference point selection) but processes only the one specified file.
+
+        Parameters
+        ----------
+        disp_file : Path
+            Path to the NetCDF displacement file to calibrate.
+        tropo_file : Path, optional
+            Path to a tropospheric correction GeoTIFF for this epoch.
+
+        Returns
+        -------
+        CalibrationState
+            Workflow state with ``n_files_total = 1`` and, on success,
+            one entry in ``output_files``.
+
+        """
+        from .utils import parse_window_size_meters
+
+        assert self.io_reader is not None, "io_reader not initialized"
+
+        logger.info("=" * 60)
+        logger.info("Starting Venti Single-File Calibration")
+        logger.info("=" * 60)
+        logger.info(f"Input file : {disp_file}")
+        if tropo_file is not None:
+            logger.info(f"Tropo file : {tropo_file}")
+
+        self.setup_gnss()
+        los_east, los_north, los_up, mask = self.load_los_and_mask()
+        ref_point = self.find_reference_point(mask)
+
+        window_size_pixels = parse_window_size_meters(
+            self.config.grid_settings.window_size_meters,
+            self.config.grid_settings.posting_meters,
+        )
+
+        self.state.n_files_total = 1
+
+        output_file = self.process_displacement_file(
+            disp_file,
+            los_east,
+            los_north,
+            los_up,
+            mask,
+            ref_point,
+            window_size_pixels,
+            window_size_pixels,
+            tropo_file=tropo_file,
+        )
+
+        if output_file:
+            self.state.output_files.append(output_file)
+        else:
+            self.state.n_files_failed += 1
+
+        self.state.n_files_processed += 1
+
+        logger.info("=" * 60)
+        logger.info("Single-File Calibration Complete")
+        logger.info("=" * 60)
+        logger.info(f"Output: {output_file or 'FAILED'}")
+
+        return self.state
+
     def run(self, max_files: int | None = None) -> CalibrationState:
         """Run the complete calibration workflow.
 

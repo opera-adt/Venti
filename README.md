@@ -78,19 +78,34 @@ primary_executable:
 
 ### 3. Run the workflow
 
+Two modes are available depending on whether you want to process a full directory of files or a single epoch.
+
+**Batch run** — calibrates all `.nc` files found in `input_files`:
+
 ```bash
 python -m venti run configs/runconfig.yaml
 ```
 
-`algorithm_parameters.yaml` is auto-discovered from the same directory as `runconfig.yaml`, so keep both files together. Increase verbosity with `--log-level DEBUG`:
+**Single-file run** — calibrates one specified displacement file:
 
 ```bash
-python -m venti run configs/runconfig.yaml --log-level DEBUG
+python -m venti run-single configs/runconfig.yaml /path/to/epoch_001.nc
 ```
+
+With an optional tropospheric correction for that epoch:
+
+```bash
+python -m venti run-single configs/runconfig.yaml /path/to/epoch_001.nc \
+    --tropo-file /path/to/tropo_001.tif
+```
+
+`algorithm_parameters.yaml` is auto-discovered from the same directory as `runconfig.yaml`, so keep both files together. Increase verbosity with `--log-level DEBUG` on either command.
 
 ---
 
 ## Running from Python
+
+**Batch run:**
 
 ```python
 from venti.workflow.calibration import CalibrationWorkflow
@@ -103,6 +118,21 @@ state = workflow.run()
 print(f"Processed: {state.n_files_processed} / {state.n_files_total}")
 for f in state.output_files:
     print(f"  {f.name}")
+```
+
+**Single-file run:**
+
+```python
+from pathlib import Path
+
+from venti.workflow.calibration import CalibrationWorkflow
+from venti.workflow.config import load_config
+
+config = load_config("configs/runconfig.yaml")
+workflow = CalibrationWorkflow(config=config)
+state = workflow.run_single(disp_file=Path("/path/to/epoch_001.nc"))
+
+print(f"Output: {state.output_files[0]}")
 ```
 
 `load_config` auto-discovers `algorithm_parameters.yaml` from the same directory as `runconfig.yaml`. You can also build the configuration fully in Python — see the [calibration workflow notebook](notebooks/calibration_workflow.ipynb) for a complete example.
