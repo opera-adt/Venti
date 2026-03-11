@@ -115,7 +115,7 @@ def run_command(config_file: str, log_level: str = "INFO") -> None:
 
         logger.info("Configuration loaded successfully")
         logger.info(f"  Input directory: {config.input_options.input_files}")
-        logger.info(f"  Output directory: {config.input_options.work_directory}")
+        logger.info(f"  Output directory: {config.run_config.product_path_group.product_path}")
         logger.info(f"  Grid type: {config.grid_settings.grid_type}")
         logger.info(f"  Reference frame: {config.grid_settings.reference_frame}")
 

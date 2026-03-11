@@ -45,6 +45,70 @@ editable mode
 python -m pip install --n
 ```
 
+---
+
+## Running from CLI
+
+### 1. Generate configuration templates
+
+```bash
+python -m venti config --output-dir configs/
+```
+
+This writes two files to `configs/`:
+- `runconfig.yaml` — run-specific settings (input/output paths, workflow type)
+- `algorithm_parameters.yaml` — algorithm defaults that rarely need changing
+
+### 2. Edit `runconfig.yaml`
+
+Fill in the section that matches your workflow. For calibration:
+
+```yaml
+calibration_input_group:
+  input_files: path/to/displacement/files   # directory of OPERA DISP NetCDF files
+  los_file:    path/to/los_vectors.tif      # 3-band GeoTIFF (east, north, up)
+  water_mask:  path/to/water_mask.tif       # GeoTIFF (1=land, 0=water)
+
+product_path_group:
+  product_path: output/
+
+primary_executable:
+  workflow_name: calibrate                  # or 'decompose'
+```
+
+### 3. Run the workflow
+
+```bash
+python -m venti run configs/runconfig.yaml
+```
+
+`algorithm_parameters.yaml` is auto-discovered from the same directory as `runconfig.yaml`, so keep both files together. Increase verbosity with `--log-level DEBUG`:
+
+```bash
+python -m venti run configs/runconfig.yaml --log-level DEBUG
+```
+
+---
+
+## Running from Python
+
+```python
+from venti.workflow.calibration import CalibrationWorkflow
+from venti.workflow.config import load_config
+
+config = load_config("configs/runconfig.yaml")
+workflow = CalibrationWorkflow(config=config)
+state = workflow.run()
+
+print(f"Processed: {state.n_files_processed} / {state.n_files_total}")
+for f in state.output_files:
+    print(f"  {f.name}")
+```
+
+`load_config` auto-discovers `algorithm_parameters.yaml` from the same directory as `runconfig.yaml`. You can also build the configuration fully in Python — see the [calibration workflow notebook](notebooks/calibration_workflow.ipynb) for a complete example.
+
+---
+
 ### Setup for contributing
 
 

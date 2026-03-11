@@ -24,6 +24,11 @@ calibration_options:
   # Type: boolean
   unwrap_error_correction: true
 
+  # Recompute GNSS LOS interpolation even if a cached file already exists
+  # Set to false to reuse cached results and skip recomputation
+  # Type: boolean
+  recompute_gnss: true
+
   # Window size for plane fitting in meters
   # Larger windows smooth more but may miss local variations
   # Typical values: 10000-50000
