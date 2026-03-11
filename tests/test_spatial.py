@@ -315,7 +315,7 @@ class TestSpatialProcessor:
         insar = np.zeros((self.NY, self.NX), dtype=np.float32)
         gnss = np.zeros((self.NY, self.NX), dtype=np.float32)
         result = processor.fit_windowed_surface(
-            insar, gnss, bounds=self.SNWE,
+            insar, gnss, 
             window_size_x=40, window_size_y=30, n_jobs=1,
         )
         assert isinstance(result, np.ndarray)
@@ -328,7 +328,7 @@ class TestSpatialProcessor:
         insar = np.zeros((self.NY, self.NX), dtype=np.float32)
         gnss = np.zeros((self.NY, self.NX), dtype=np.float32)
         result = processor.fit_windowed_surface(
-            insar, gnss, bounds=self.SNWE,
+            insar, gnss, 
             window_size_x=40, window_size_y=30, n_jobs=1,
         )
         assert result.shape == (self.NY, self.NX)
@@ -341,7 +341,7 @@ class TestSpatialProcessor:
         gnss = np.zeros((self.NY, self.NX), dtype=np.float32)
         for order in [0, 1, 1.5, 2]:
             result = processor.fit_windowed_surface(
-                insar, gnss, bounds=self.SNWE,
+                insar, gnss, 
                 window_size_x=40, window_size_y=30,
                 poly_order=order, n_jobs=1,
             )
@@ -354,7 +354,7 @@ class TestSpatialProcessor:
         insar = np.zeros((self.NY, self.NX), dtype=np.float32)
         gnss = np.zeros((self.NY, self.NX), dtype=np.float32)
         result = processor.fit_windowed_surface(
-            insar, gnss, bounds=self.SNWE,
+            insar, gnss, 
             window_size_x=40, window_size_y=30,
             window_extend_x=20, window_extend_y=15, n_jobs=1,
         )
