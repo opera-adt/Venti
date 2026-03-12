@@ -695,7 +695,7 @@ class TestMatchCorrectionToDisplacement:
             matches = match_correction_to_displacement(None, disp_files)
 
             assert len(matches) == 2
-            assert all(corr == "None" for corr, _ in matches)
+            assert all(corr is None for corr, _ in matches)
 
     def test_with_matching_corrections(self):
         """Test matching correction files to displacement files."""

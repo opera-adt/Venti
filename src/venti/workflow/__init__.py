@@ -25,7 +25,7 @@ __all__ = [
     # Workflow types
     "WorkflowType",
     "calibrate_timeseries",
-    "create_config_template",
+    "create_config_templates",
     "decompose_timeseries",
     "load_config",
     "run_calibration_workflow",

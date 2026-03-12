@@ -238,4 +238,6 @@ filterwarnings = [
   "ignore:numpy.ufunc size changed.*:RuntimeWarning",
   # Ignore pyproj database path warnings
   "ignore:pyproj unable to set PROJ database path.*:UserWarning",
+  # Ignore numpy scalar conversion deprecation from geopandas/pyproj CRS transforms
+  "ignore:Conversion of an array with ndim > 0 to a scalar.*:DeprecationWarning",
 ]

@@ -240,7 +240,7 @@ class TestFitWindowedPlane:
             win_xsize=40, win_ysize=30,
             win_overlap_x=5, win_overlap_y=5,
             win_extend_x=40, win_extend_y=30,
-            snwe=self.SNWE, n_jobs=1,
+            n_jobs=1,
         )
         assert surface.shape == (self.NY, self.NX)
         assert std.shape == (self.NY, self.NX)
@@ -254,7 +254,7 @@ class TestFitWindowedPlane:
             win_xsize=40, win_ysize=30,
             win_overlap_x=5, win_overlap_y=5,
             win_extend_x=40, win_extend_y=30,
-            snwe=self.SNWE, poly_order=1, n_jobs=1,
+            poly_order=1, n_jobs=1,
         )
         assert np.nanmax(np.abs(surface)) < 1e-4
 
@@ -267,7 +267,7 @@ class TestFitWindowedPlane:
             win_xsize=40, win_ysize=30,
             win_overlap_x=5, win_overlap_y=5,
             win_extend_x=40, win_extend_y=30,
-            snwe=self.SNWE, poly_order=1, n_jobs=1,
+            poly_order=1, n_jobs=1,
         )
         assert np.nanmax(np.abs(surface)) > 1e-4
 
@@ -281,7 +281,7 @@ class TestFitWindowedPlane:
             win_xsize=40, win_ysize=30,
             win_overlap_x=5, win_overlap_y=5,
             win_extend_x=40, win_extend_y=30,
-            snwe=self.SNWE, n_jobs=1,
+            n_jobs=1,
         )
         assert surface.shape == (self.NY, self.NX)
 
@@ -295,7 +295,7 @@ class TestFitWindowedPlane:
             win_xsize=40, win_ysize=30,
             win_overlap_x=5, win_overlap_y=5,
             win_extend_x=40, win_extend_y=30,
-            snwe=self.SNWE, gnss_los_std=std_field, n_jobs=1,
+            gnss_los_std=std_field, n_jobs=1,
         )
         assert surface.shape == (self.NY, self.NX)
 

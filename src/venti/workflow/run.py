@@ -70,8 +70,8 @@ def run_workflow(
         os.environ["OMP_NUM_THREADS"] = str(config.worker_settings.threads_per_worker)
 
     # Set up logging if log_file is specified
-    if config.log_file:
-        file_handler = logging.FileHandler(config.log_file)
+    if config.run_config.log_file:
+        file_handler = logging.FileHandler(config.run_config.log_file)
         file_handler.setLevel(logging.INFO)
         logging.getLogger().addHandler(file_handler)
 

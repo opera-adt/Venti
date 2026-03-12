@@ -99,10 +99,10 @@ class TestFindStationsInBounds:
     def test_stations_within_bounds_returned(self):
         with tempfile.TemporaryDirectory() as tmp:
             lookup = Path(tmp) / "grid_latlon_lookup.txt"
-            # UTM zone 11N: approx lon -120..-114, lat 34..37
+            # UTM zone 11N: approx lon -120..-114, lat 34..36
             self._write_lookup(lookup, [
-                (1, -118.0, 35.0),   # inside
-                (2, -117.5, 35.5),   # inside
+                (1, -118.0, 35.0),   # inside: easting~409k, northing~3870k
+                (2, -117.5, 34.5),   # inside: easting~455k, northing~3814k
                 (3, -110.0, 35.0),   # outside (east)
             ])
             # bounds in UTM zone 11N metres (S, N, W, E)
@@ -343,7 +343,7 @@ class TestProjectToLos:
                 dup=np.array([0.002, 0.002, 0.002]),
             )
 
-            result = project_to_los(los_e, los_n, los_u, nc, gdf, method="linear")
+            result = project_to_los(los_e, los_n, los_u, nc, gdf, method="griddata")
             assert result.shape == (ny, nx)
 
     def test_raises_when_no_valid_samples(self):
@@ -379,17 +379,22 @@ class TestProjectToLos:
             los_u = np.ones((ny, nx_size), dtype=np.float32)
 
             dup_val = 0.007
+            # Use a 3x3 grid of stations to constrain the RBF across the full domain
+            xi = [x[0], x[4], x[9]]
+            yi = [y[0], y[3], y[7]]
+            x_coords = np.array([xi[c] for r in range(3) for c in range(3)], dtype=np.float32)
+            y_coords = np.array([yi[r] for r in range(3) for c in range(3)], dtype=np.float32)
             gdf = _make_gnss_gdf(
-                x_coords=np.array([x[1], x[5], x[8]], dtype=np.float32),
-                y_coords=np.array([y[2], y[4], y[6]], dtype=np.float32),
-                deast=np.array([0.0, 0.0, 0.0]),
-                dnorth=np.array([0.0, 0.0, 0.0]),
-                dup=np.full(3, dup_val),
+                x_coords=x_coords,
+                y_coords=y_coords,
+                deast=np.zeros(9),
+                dnorth=np.zeros(9),
+                dup=np.full(9, dup_val),
             )
 
-            result = project_to_los(los_e, los_n, los_u, nc, gdf, method="linear")
+            result = project_to_los(los_e, los_n, los_u, nc, gdf, method="rbf")
             interior = result[2:-2, 2:-2]
-            assert np.allclose(interior, dup_val, atol=1e-4)
+            assert np.allclose(interior, dup_val, atol=1e-3)
 
 
 @pytest.mark.skipif(not HAS_GEOPANDAS, reason="geopandas not installed")

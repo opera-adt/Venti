@@ -266,9 +266,9 @@ def read_epoch_displacements(
 
         rows.append({
             "id": station_id,
-            "deast": sec_row["east"] - ref_row["east"],
-            "dnorth": sec_row["north"] - ref_row["north"],
-            "dup": sec_row["up"] - ref_row["up"],
+            "deast": ref_row["east"] - sec_row["east"],
+            "dnorth": ref_row["north"] - sec_row["north"],
+            "dup": ref_row["up"] - sec_row["up"],
             "dsigma_e": np.hypot(ref_row["sigma_e"], sec_row["sigma_e"]),
             "dsigma_n": np.hypot(ref_row["sigma_n"], sec_row["sigma_n"]),
             "dsigma_u": np.hypot(ref_row["sigma_u"], sec_row["sigma_u"]),

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .fitting import fit_windowed_plane
+from ..filtering.moving_window import fit_windowed_plane
 
 logger = logging.getLogger(__name__)
 
