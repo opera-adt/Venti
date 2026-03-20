@@ -362,6 +362,8 @@ class CalibrationInputGroup(BaseModel):
         Path to GeoJSON file defining frame boundaries
     tropo_files : Path, optional
         Directory with tropospheric correction files
+    event_mask_dir : Path, optional
+        Directory with per-epoch event mask GeoTIFFs (1=valid, 0=event region)
     reference_point : tuple[int, int], optional
         Reference point (row, col), None for auto-select
 
@@ -399,6 +401,17 @@ class CalibrationInputGroup(BaseModel):
         None,
         description="Directory with tropospheric correction NetCDF files (optional)",
     )
+    event_mask_dir: Path | None = Field(
+        None,
+        description=(
+            "Directory containing per-epoch event mask GeoTIFFs (1=valid, 0=event "
+            "region). Each mask file must be named with the displacement file stem as "
+            "a prefix, e.g. as produced by generate_event_mask.py. When provided, "
+            "event-region pixels are filled with nearest valid neighbors before "
+            "calibration surface estimation, then the surface is removed from the "
+            "full (unmasked) displacement."
+        ),
+    )
     reference_point: tuple[int, int] | None = Field(
         None,
         description=(
@@ -415,7 +428,7 @@ class CalibrationInputGroup(BaseModel):
             return Path(v)
         return v
 
-    @field_validator("custom_mask", "frame_bounds", "tropo_files", mode="before")
+    @field_validator("custom_mask", "frame_bounds", "tropo_files", "event_mask_dir", mode="before")
     @classmethod
     def convert_optional_to_path(cls, v):
         """Convert optional string paths to Path objects."""
@@ -435,7 +448,7 @@ class CalibrationInputGroup(BaseModel):
             raise ValueError(msg)
         return v
 
-    @field_validator("custom_mask", "frame_bounds", "tropo_files")
+    @field_validator("custom_mask", "frame_bounds", "tropo_files", "event_mask_dir")
     @classmethod
     def validate_optional_exists(cls, v):
         """Validate that optional paths exist if provided.

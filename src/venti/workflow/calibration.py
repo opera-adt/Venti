@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 _WAVELENGTH_MM: float = 0.0555 / 2 * 1000
 
 
+
 @dataclass
 class CalibrationState:
     """State tracking for calibration workflow.
@@ -340,6 +341,7 @@ class CalibrationWorkflow:
         window_size_x: int,
         window_size_y: int,
         tropo_file: Path | None = None,
+        event_mask_file: Path | None = None,
     ) -> Path | None:
         """Process a single displacement file.
 
@@ -363,6 +365,11 @@ class CalibrationWorkflow:
             Window height
         tropo_file : Path, optional
             Tropospheric correction file path
+        event_mask_file : Path, optional
+            Per-epoch event mask GeoTIFF (1=valid, 0=event region).  When
+            provided, the event region is filled with nearest valid neighbors
+            before calibration surface estimation.  The calibration surface is
+            then removed from the full (unmasked) displacement.
 
         Returns
         -------
@@ -408,6 +415,17 @@ class CalibrationWorkflow:
         # Apply mask
         disp = np.where(mask & ~np.isnan(disp), disp, np.nan)
 
+        # Load event mask and build displacement array for calibration fitting.
+        event_mask: np.ndarray | None = None
+        if event_mask_file is not None:
+            event_mask_data = self.io_reader.read_geotiff(event_mask_file)
+            event_mask = event_mask_data.data.astype(bool)
+            n_event_pixels = int((~event_mask).sum())
+            logger.debug(
+                f"Event mask loaded from {event_mask_file.name}: "
+                f"{n_event_pixels:,} event-region pixels will be filled for calibration"
+            )
+
         # Correct unwrap errors (optional)
         apply_unwrap_correction = (
             self.config.algorithm_parameters.calibration_options.unwrap_error_correction
@@ -422,6 +440,15 @@ class CalibrationWorkflow:
             disp = disp.filled(np.nan)
         if isinstance(gnss_los, np.ma.MaskedArray):
             gnss_los = gnss_los.filled(np.nan)
+
+        # Build displacement array for calibration surface estimation.
+        # If an event mask is provided, fill the event region with nearest pixels
+        if event_mask is not None:
+            from ..spatial.interpolation import fill_masked_region
+
+            disp_for_cal = fill_masked_region(disp, event_mask)
+        else:
+            disp_for_cal = disp
 
         # Downsample if requested
         original_shape = disp.shape
@@ -447,9 +474,16 @@ class CalibrationWorkflow:
                         "Using unweighted downsampling."
                     )
 
-            # Downsample displacement
+            # Downsample displacement (original, for output) and the
+            # event-filled version (for calibration surface estimation)
             disp_ds = downsample_array(
                 disp,
+                self.config.grid_settings.downsample_factor,
+                method=self.config.grid_settings.downsample_method,
+                weights=weights,
+            )
+            disp_for_cal_ds = downsample_array(
+                disp_for_cal,
                 self.config.grid_settings.downsample_factor,
                 method=self.config.grid_settings.downsample_method,
                 weights=weights,
@@ -471,14 +505,16 @@ class CalibrationWorkflow:
             )
         else:
             disp_ds = disp
+            disp_for_cal_ds = disp_for_cal
             gnss_los_ds = gnss_los
             win_x_ds = window_size_x
             win_y_ds = window_size_y
 
-        # Fit calibration surface
+        # Fit calibration surface using event-filled displacement so that
+        # transient deformation in the event region does not bias the fit
         logger.debug("Fitting calibration surface...")
         calibration_surface = self.spatial_processor.fit_windowed_surface(
-            insar_data=disp_ds,
+            insar_data=disp_for_cal_ds,
             gnss_los=gnss_los_ds,
             window_size_x=win_x_ds,
             window_size_y=win_y_ds,
@@ -488,7 +524,7 @@ class CalibrationWorkflow:
             n_jobs=-1,
         )
 
-        # Apply calibration
+        # Remove calibration surface from the original (unmasked) displacement
         corrected_ds = disp_ds - calibration_surface
 
         # Upsample if needed
@@ -533,6 +569,42 @@ class CalibrationWorkflow:
 
         logger.debug(f"Saved: {output_file.name}")
         return output_file
+
+    def _find_event_mask_file(self, disp_file: Path) -> Path | None:
+        """Find the per-epoch event mask file matching a displacement file.
+
+        Looks for a GeoTIFF in ``config.input_options.event_mask_dir`` whose
+        filename starts with the displacement file stem, following the naming
+        convention produced by ``generate_event_mask.py``:
+        ``<disp_stem>_<geojson_stem>_mask.tif``.
+
+        Parameters
+        ----------
+        disp_file : Path
+            Displacement NetCDF file for which to find a matching event mask.
+
+        Returns
+        -------
+        Path or None
+            Path to the matching event mask GeoTIFF, or ``None`` if no
+            ``event_mask_dir`` is configured or no match is found.
+
+        """
+        event_mask_dir = self.config.input_options.event_mask_dir
+        if event_mask_dir is None:
+            return None
+
+        matches = sorted(event_mask_dir.glob(f"{disp_file.stem}_*mask.tif"))
+        if not matches:
+            logger.debug(f"No event mask found for {disp_file.name}")
+            return None
+
+        if len(matches) > 1:
+            logger.warning(
+                f"Multiple event masks found for {disp_file.name}; "
+                f"using {matches[0].name}"
+            )
+        return matches[0]
 
     def run_single(
         self,
@@ -580,6 +652,10 @@ class CalibrationWorkflow:
 
         self.state.n_files_total = 1
 
+        event_mask_file = self._find_event_mask_file(disp_file)
+        if event_mask_file is not None:
+            logger.info(f"Event mask : {event_mask_file}")
+
         output_file = self.process_displacement_file(
             disp_file,
             los_east,
@@ -590,6 +666,7 @@ class CalibrationWorkflow:
             window_size_pixels,
             window_size_pixels,
             tropo_file=tropo_file,
+            event_mask_file=event_mask_file,
         )
 
         if output_file:
@@ -670,6 +747,7 @@ class CalibrationWorkflow:
 
         # Process each file
         for tropo_file, disp_file in tqdm(self.matched_files, desc="Calibrating"):
+            event_mask_file = self._find_event_mask_file(disp_file)
             output_file = self.process_displacement_file(
                 disp_file,
                 los_east,
@@ -680,6 +758,7 @@ class CalibrationWorkflow:
                 window_size_pixels,
                 window_size_pixels,
                 tropo_file=tropo_file,
+                event_mask_file=event_mask_file,
             )
 
             if output_file:

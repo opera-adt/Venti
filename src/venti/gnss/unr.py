@@ -22,8 +22,8 @@ logger = logging.getLogger(__name__)
 # UNR timeseries endpoints keyed by reference frame
 _UNR_URLS: dict[str, dict[str, str]] = {
     "IGS20": {
-        "grid": "https://geodesy.unr.edu/grid_timeseries/Version0.2/grid_latlon_lookup.txt",
-        "data": "https://geodesy.unr.edu/grid_timeseries/Version0.2/time_variable_gridded/IGS20/",
+        "grid": "https://geodesy.unr.edu/grid_timeseries/Version0.3/grid_latlon_lookup.txt",
+        "data": "https://geodesy.unr.edu/grid_timeseries/Version0.3/time_variable_gridded/IGS20/",
     },
     "IGS14": {
         "grid": "https://geodesy.unr.edu/grid_timeseries/grid_latlon_lookup.txt",

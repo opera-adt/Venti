@@ -19,6 +19,63 @@ from tqdm import tqdm
 logger = logging.getLogger(__name__)
 
 InterpolationMethod = Literal["rbf", "griddata"]
+
+
+def fill_masked_region(
+    data: np.ndarray,
+    mask: np.ndarray,
+) -> np.ndarray:
+    """Fill masked pixels with nearest valid neighbor values.
+
+    Pixels where ``mask == 0`` are replaced by the value of their nearest
+    spatially valid neighbor — a pixel that is neither masked nor NaN.
+
+    Parameters
+    ----------
+    data : np.ndarray
+        2-D data array.  NaN denotes pixels that are independently invalid
+        (e.g. water or no-data regions).
+    mask : np.ndarray
+        2-D binary mask aligned to ``data`` (1 = valid, 0 = region to fill).
+
+    Returns
+    -------
+    np.ndarray
+        Copy of ``data`` with masked pixels replaced by their nearest valid
+        neighbor.
+
+    Notes
+    -----
+    Uses :func:`scipy.ndimage.distance_transform_edt` to locate the nearest
+    valid source pixel for every masked pixel in O(n) time.
+
+    Examples
+    --------
+    ::
+
+        filled = fill_masked_region(displacement_mm, event_mask)
+
+    """
+    from scipy.ndimage import distance_transform_edt
+
+    fill_region = ~mask.astype(bool)
+    # Source pixels: not NaN and not in the fill region
+    valid = ~np.isnan(data) & ~fill_region
+
+    if not valid.any():
+        logger.warning(
+            "No valid source pixels outside the masked region; fill has no effect"
+        )
+        return data.copy()
+
+    # For every pixel in ~valid, find the (row, col) of the nearest valid pixel
+    _, nearest = distance_transform_edt(
+        ~valid, return_distances=False, return_indices=True
+    )
+
+    filled = data.copy()
+    filled[fill_region] = data[nearest[0][fill_region], nearest[1][fill_region]]
+    return filled
 RbfFunction = Literal["multiquadric", "inverse", "gaussian", "linear", "cubic", "quintic", "thin_plate"]
 GriddataMethod = Literal["linear", "nearest", "cubic"]
 
