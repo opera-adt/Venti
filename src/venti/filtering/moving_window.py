@@ -245,6 +245,9 @@ def fit_windowed_plane(
     poly_order: float = 1.5,
     n_jobs: int = -1,
     smoothing_sigma: float | None = None,
+    smoothing_method: str = "gaussian",
+    sg_window_length: int = 51,
+    sg_polyorder: int = 3,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Fit a windowed polynomial calibration surface to InSAR data.
 
@@ -279,9 +282,19 @@ def fit_windowed_plane(
         Number of parallel jobs for ``joblib.Parallel``,
         by default ``-1`` (all CPUs).
     smoothing_sigma : float, optional
-        Standard deviation (pixels) of a Gaussian filter applied to the
-        assembled surface after blending.  Suppresses residual seam
-        artifacts between windows.  ``None`` disables smoothing.
+        Standard deviation (pixels) passed to the post-assembly low-pass
+        filter.  Ignored when ``smoothing_method="savitzky_golay"``.
+        ``None`` disables smoothing.
+    smoothing_method : str, optional
+        Post-assembly low-pass filter to apply.  One of ``"gaussian"``
+        (default, spatial-domain), ``"gaussian_fft"``, ``"hanning_fft"``,
+        or ``"savitzky_golay"``.
+    sg_window_length : int, optional
+        Window length for the Savitzky-Golay filter in pixels (must be odd),
+        by default ``51``.  Only used when ``smoothing_method="savitzky_golay"``.
+    sg_polyorder : int, optional
+        Polynomial order for the Savitzky-Golay filter, by default ``3``.
+        Only used when ``smoothing_method="savitzky_golay"``.
 
     Returns
     -------
@@ -387,23 +400,32 @@ def fit_windowed_plane(
     nonzero_std = weight_std > 0
     cal_std[nonzero_std] /= weight_std[nonzero_std]
 
-    if smoothing_sigma is not None:
-        from scipy.ndimage import gaussian_filter
+    _apply_smoothing = smoothing_sigma is not None or smoothing_method == "savitzky_golay"
+    if _apply_smoothing:
+        from .low_pass_filters import (
+            gaussian_fft,
+            gaussian_spatial,
+            hanning_fft,
+            savitzky_golay,
+        )
 
-        # Preserve NaN/zero boundary by smoothing only valid pixels.
-        # truncate=2.0 halves kernel radius vs the scipy default (4.0), ~4x faster
-        # per pass with negligible quality loss for artifact suppression.
-        _kw = {"sigma": smoothing_sigma, "truncate": 2.0}
-        valid = nonzero.astype(np.float64)
-        smoothed_weight = gaussian_filter(valid, **_kw)
-        has_weight = smoothed_weight > 0
-        smoothed_vals = gaussian_filter(cal_surface * valid, **_kw)
-        cal_surface[has_weight] = smoothed_vals[has_weight] / smoothed_weight[has_weight]
-
-        if nonzero_std.any():
-            smoothed_std_vals = gaussian_filter(cal_std * valid, **_kw)
-            cal_std[has_weight] = smoothed_std_vals[has_weight] / smoothed_weight[has_weight]
-
-        logger.debug("Applied Gaussian smoothing with sigma=%.1f px", smoothing_sigma)
+        valid = nonzero
+        if smoothing_method == "gaussian_fft":
+            cal_surface = gaussian_fft(cal_surface, valid, smoothing_sigma)  # type: ignore[arg-type]
+            if nonzero_std.any():
+                cal_std = gaussian_fft(cal_std, nonzero_std, smoothing_sigma)  # type: ignore[arg-type]
+        elif smoothing_method == "hanning_fft":
+            cal_surface = hanning_fft(cal_surface, valid, smoothing_sigma)  # type: ignore[arg-type]
+            if nonzero_std.any():
+                cal_std = hanning_fft(cal_std, nonzero_std, smoothing_sigma)  # type: ignore[arg-type]
+        elif smoothing_method == "savitzky_golay":
+            cal_surface = savitzky_golay(cal_surface, valid, sg_window_length, sg_polyorder)
+            if nonzero_std.any():
+                cal_std = savitzky_golay(cal_std, nonzero_std, sg_window_length, sg_polyorder)
+        else:
+            # default: spatial Gaussian
+            cal_surface = gaussian_spatial(cal_surface, valid, smoothing_sigma)  # type: ignore[arg-type]
+            if nonzero_std.any():
+                cal_std = gaussian_spatial(cal_std, nonzero_std, smoothing_sigma)  # type: ignore[arg-type]
 
     return cal_surface.astype(np.float32), cal_std.astype(np.float32)

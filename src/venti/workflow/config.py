@@ -8,7 +8,7 @@ This module provides configuration management split into two files:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import yaml  # type: ignore[import-untyped]
 from pydantic import BaseModel, Field, field_validator
@@ -138,9 +138,12 @@ class CalibrationOptions(BaseModel):
         Cutoff wavelength for longwavelength filtering
     moving_window_size_meters : float
         Moving window filter size in meters
+    calibration_surface_smoothing_method : str
+        Post-assembly low-pass filter: ``'gaussian'`` (default), ``'gaussian_fft'``,
+        ``'hanning_fft'``, or ``'savitzky_golay'``.
     calibration_surface_smoothing_sigma : float or None
-        Gaussian smoothing sigma (pixels) for the calibration surface.
-        ``None`` auto-selects ``window_size_pixels / 4``; ``0`` disables smoothing.
+        Sigma (pixels) for the smoothing filter; ignored for ``'savitzky_golay'``.
+        ``None`` auto-selects ``window_size_pixels / 8``; ``0`` disables smoothing.
     savitzky_golay : SavitzkyGolayOptions
         Savitzky-Golay filter parameters
     fft_filter : FFTFilterOptions
@@ -202,14 +205,23 @@ class CalibrationOptions(BaseModel):
         gt=0,
         description="Moving window filter size in meters",
     )
+    calibration_surface_smoothing_method: Literal[
+        "gaussian", "gaussian_fft", "hanning_fft", "savitzky_golay"
+    ] = Field(
+        "gaussian",
+        description=(
+            "Post-assembly low-pass filter applied to the calibration surface.  "
+            "One of 'gaussian' (spatial-domain, default), 'gaussian_fft', "
+            "'hanning_fft', or 'savitzky_golay'."
+        ),
+    )
     calibration_surface_smoothing_sigma: float | None = Field(
         None,
         ge=0,
         description=(
-            "Gaussian smoothing standard deviation (pixels) applied to the assembled "
-            "calibration surface to suppress window-boundary seam artifacts.  "
-            "``None`` (default) uses window_size_pixels / 4 automatically.  "
-            "Set to 0 to disable smoothing entirely."
+            "Sigma (pixels) for the post-assembly smoothing filter; ignored for "
+            "'savitzky_golay'.  ``None`` (default) auto-selects "
+            "``window_size_pixels / 8``.  Set to 0 to disable smoothing entirely."
         ),
     )
     savitzky_golay: SavitzkyGolayOptions = Field(
@@ -787,8 +799,9 @@ class RunConfig(BaseModel):
         "extra": "forbid",
     }
 
-    def model_post_init(self, _: object, /) -> None:
+    def model_post_init(self, __context: Any) -> None:
         """Validate that the correct input group is provided for the workflow type."""
+        super().model_post_init(__context)
         workflow_name = self.primary_executable.workflow_name
 
         if workflow_name == "calibrate" and self.calibration_input_group is None:

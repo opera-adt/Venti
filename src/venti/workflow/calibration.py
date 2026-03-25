@@ -507,7 +507,9 @@ class CalibrationWorkflow:
         # Overlap of 50 % ensures Hann-tapered windows sum to near-uniform weight.
         overlap_x = win_x_ds // 2
         overlap_y = win_y_ds // 2
-        cfg_sigma = self.config.algorithm_parameters.calibration_options.calibration_surface_smoothing_sigma
+        cal_opts = self.config.algorithm_parameters.calibration_options
+        smoothing_method = cal_opts.calibration_surface_smoothing_method
+        cfg_sigma = cal_opts.calibration_surface_smoothing_sigma
         if cfg_sigma is None:
             # Default: 1/8 of the smaller window dimension suppresses seams without over-smoothing
             smoothing_sigma: float | None = min(win_x_ds, win_y_ds) / 8
@@ -525,6 +527,9 @@ class CalibrationWorkflow:
             poly_order=1.5,
             n_jobs=-1,
             smoothing_sigma=smoothing_sigma,
+            smoothing_method=smoothing_method,
+            sg_window_length=cal_opts.savitzky_golay.window_length,
+            sg_polyorder=cal_opts.savitzky_golay.polyorder,
         )
 
         # Upsample calibration surface if needed

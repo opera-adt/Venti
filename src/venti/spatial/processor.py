@@ -52,6 +52,9 @@ class SpatialProcessor:
         poly_order: float = 1.5,
         n_jobs: int = -1,
         smoothing_sigma: float | None = None,
+        smoothing_method: str = "gaussian",
+        sg_window_length: int = 51,
+        sg_polyorder: int = 3,
     ) -> np.ndarray:
         """Estimate the long-wavelength InSAR calibration surface.
 
@@ -87,9 +90,17 @@ class SpatialProcessor:
         n_jobs : int, optional
             Number of parallel ``joblib`` workers, by default ``-1`` (all CPUs).
         smoothing_sigma : float, optional
-            Standard deviation (pixels) of a Gaussian filter applied to the
-            assembled surface after blending.  Suppresses residual seam
-            artifacts between windows.  ``None`` disables smoothing.
+            Standard deviation (pixels) passed to the post-assembly low-pass
+            filter.  Ignored when ``smoothing_method="savitzky_golay"``.
+            ``None`` disables smoothing.
+        smoothing_method : str, optional
+            Post-assembly low-pass filter.  One of ``"gaussian"`` (default),
+            ``"gaussian_fft"``, ``"hanning_fft"``, or ``"savitzky_golay"``.
+        sg_window_length : int, optional
+            Window length for Savitzky-Golay in pixels (must be odd),
+            by default ``51``.
+        sg_polyorder : int, optional
+            Polynomial order for Savitzky-Golay, by default ``3``.
 
         Returns
         -------
@@ -114,5 +125,8 @@ class SpatialProcessor:
             poly_order=poly_order,
             n_jobs=n_jobs,
             smoothing_sigma=smoothing_sigma,
+            smoothing_method=smoothing_method,
+            sg_window_length=sg_window_length,
+            sg_polyorder=sg_polyorder,
         )
         return surface
