@@ -51,6 +51,7 @@ class SpatialProcessor:
         gnss_los_std: np.ndarray | None = None,
         poly_order: float = 1.5,
         n_jobs: int = -1,
+        smoothing_sigma: float | None = None,
     ) -> np.ndarray:
         """Estimate the long-wavelength InSAR calibration surface.
 
@@ -85,6 +86,10 @@ class SpatialProcessor:
             Polynomial order for plane fitting, by default ``1.5``.
         n_jobs : int, optional
             Number of parallel ``joblib`` workers, by default ``-1`` (all CPUs).
+        smoothing_sigma : float, optional
+            Standard deviation (pixels) of a Gaussian filter applied to the
+            assembled surface after blending.  Suppresses residual seam
+            artifacts between windows.  ``None`` disables smoothing.
 
         Returns
         -------
@@ -108,5 +113,6 @@ class SpatialProcessor:
             gnss_los_std=gnss_los_std,
             poly_order=poly_order,
             n_jobs=n_jobs,
+            smoothing_sigma=smoothing_sigma,
         )
         return surface

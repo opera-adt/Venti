@@ -244,6 +244,7 @@ def fit_windowed_plane(
     gnss_los_std: np.ndarray | None = None,
     poly_order: float = 1.5,
     n_jobs: int = -1,
+    smoothing_sigma: float | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Fit a windowed polynomial calibration surface to InSAR data.
 
@@ -277,6 +278,10 @@ def fit_windowed_plane(
     n_jobs : int, optional
         Number of parallel jobs for ``joblib.Parallel``,
         by default ``-1`` (all CPUs).
+    smoothing_sigma : float, optional
+        Standard deviation (pixels) of a Gaussian filter applied to the
+        assembled surface after blending.  Suppresses residual seam
+        artifacts between windows.  ``None`` disables smoothing.
 
     Returns
     -------
@@ -358,11 +363,47 @@ def fit_windowed_plane(
     finally:
         shutil.rmtree(_tmpdir, ignore_errors=True)
 
-    cal_surface = np.zeros(insar_data.shape, dtype=np.float32)
-    cal_std = np.zeros(insar_data.shape, dtype=np.float32)
-    for ix, plane_val, std_val in results:
-        if plane_val is not None:
-            cal_surface[ix] = plane_val
-            cal_std[ix] = std_val
+    cal_surface = np.zeros(insar_data.shape, dtype=np.float64)
+    cal_std = np.zeros(insar_data.shape, dtype=np.float64)
+    weight_sum = np.zeros(insar_data.shape, dtype=np.float64)
+    weight_std = np.zeros(insar_data.shape, dtype=np.float64)
 
-    return cal_surface, cal_std
+    for ix, plane_val, std_val in results:
+        if plane_val is None:
+            continue
+        ny, nx = plane_val.shape
+        # 2-D Hann taper: higher weight toward window centre, tapers to zero at edges
+        taper_y = np.hanning(ny)
+        taper_x = np.hanning(nx)
+        taper = np.outer(taper_y, taper_x)
+        cal_surface[ix] += plane_val * taper
+        weight_sum[ix] += taper
+        if std_val is not None:
+            cal_std[ix] += std_val * taper
+            weight_std[ix] += taper
+
+    nonzero = weight_sum > 0
+    cal_surface[nonzero] /= weight_sum[nonzero]
+    nonzero_std = weight_std > 0
+    cal_std[nonzero_std] /= weight_std[nonzero_std]
+
+    if smoothing_sigma is not None:
+        from scipy.ndimage import gaussian_filter
+
+        # Preserve NaN/zero boundary by smoothing only valid pixels.
+        # truncate=2.0 halves kernel radius vs the scipy default (4.0), ~4x faster
+        # per pass with negligible quality loss for artifact suppression.
+        _kw = {"sigma": smoothing_sigma, "truncate": 2.0}
+        valid = nonzero.astype(np.float64)
+        smoothed_weight = gaussian_filter(valid, **_kw)
+        has_weight = smoothed_weight > 0
+        smoothed_vals = gaussian_filter(cal_surface * valid, **_kw)
+        cal_surface[has_weight] = smoothed_vals[has_weight] / smoothed_weight[has_weight]
+
+        if nonzero_std.any():
+            smoothed_std_vals = gaussian_filter(cal_std * valid, **_kw)
+            cal_std[has_weight] = smoothed_std_vals[has_weight] / smoothed_weight[has_weight]
+
+        logger.debug("Applied Gaussian smoothing with sigma=%.1f px", smoothing_sigma)
+
+    return cal_surface.astype(np.float32), cal_std.astype(np.float32)

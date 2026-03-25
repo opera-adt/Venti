@@ -474,14 +474,6 @@ class CalibrationWorkflow:
                         "Using unweighted downsampling."
                     )
 
-            # Downsample displacement (original, for output) and the
-            # event-filled version (for calibration surface estimation)
-            disp_ds = downsample_array(
-                disp,
-                self.config.grid_settings.downsample_factor,
-                method=self.config.grid_settings.downsample_method,
-                weights=weights,
-            )
             disp_for_cal_ds = downsample_array(
                 disp_for_cal,
                 self.config.grid_settings.downsample_factor,
@@ -504,7 +496,6 @@ class CalibrationWorkflow:
                 1, window_size_y // self.config.grid_settings.downsample_factor
             )
         else:
-            disp_ds = disp
             disp_for_cal_ds = disp_for_cal
             gnss_los_ds = gnss_los
             win_x_ds = window_size_x
@@ -513,33 +504,42 @@ class CalibrationWorkflow:
         # Fit calibration surface using event-filled displacement so that
         # transient deformation in the event region does not bias the fit
         logger.debug("Fitting calibration surface...")
+        # Overlap of 50 % ensures Hann-tapered windows sum to near-uniform weight.
+        overlap_x = win_x_ds // 2
+        overlap_y = win_y_ds // 2
+        cfg_sigma = self.config.algorithm_parameters.calibration_options.calibration_surface_smoothing_sigma
+        if cfg_sigma is None:
+            # Default: 1/8 of the smaller window dimension suppresses seams without over-smoothing
+            smoothing_sigma: float | None = min(win_x_ds, win_y_ds) / 8
+        elif cfg_sigma == 0:
+            smoothing_sigma = None
+        else:
+            smoothing_sigma = cfg_sigma
         calibration_surface = self.spatial_processor.fit_windowed_surface(
             insar_data=disp_for_cal_ds,
             gnss_los=gnss_los_ds,
             window_size_x=win_x_ds,
             window_size_y=win_y_ds,
-            window_overlap_x=10,
-            window_overlap_y=10,
+            window_overlap_x=overlap_x,
+            window_overlap_y=overlap_y,
             poly_order=1.5,
             n_jobs=-1,
+            smoothing_sigma=smoothing_sigma,
         )
 
-        # Remove calibration surface from the original (unmasked) displacement
-        corrected_ds = disp_ds - calibration_surface
-
-        # Upsample if needed
+        # Upsample calibration surface if needed
         if self.config.grid_settings.downsample_factor > 1:
-            corrected = upsample_array(corrected_ds, original_shape)
+            calibration_surface_full = upsample_array(calibration_surface, original_shape)
         else:
-            corrected = corrected_ds
+            calibration_surface_full = calibration_surface
 
         # Convert back to meters
-        corrected = corrected / 1000.0
+        calibration_surface_full = calibration_surface_full / 1000.0
 
         # Build output filename
         grid_type = self.config.grid_settings.grid_type
         ref_frame = self.config.grid_settings.reference_frame.lower()
-        suffix = f"_corrected_{grid_type}_{ref_frame}"
+        suffix = f"_calibration_surface_{grid_type}_{ref_frame}"
         if self.config.grid_settings.downsample_factor > 1:
             suffix += f"_downsample{self.config.grid_settings.downsample_factor}"
         if tropo_file is not None:
@@ -553,14 +553,14 @@ class CalibrationWorkflow:
 
         # Save
         description = (
-            f"Calibrated displacement ({self.config.grid_settings.grid_type} GNSS"
+            f"Calibration surface ({self.config.grid_settings.grid_type} GNSS"
             " model)"
         )
         if tropo_file is not None:
             description += " with tropospheric correction"
 
         self.io_writer.write_geotiff(
-            corrected,
+            calibration_surface_full,
             output_file,
             reference_file=disp_file,
             nodata=np.nan,

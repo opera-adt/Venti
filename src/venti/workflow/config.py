@@ -138,6 +138,9 @@ class CalibrationOptions(BaseModel):
         Cutoff wavelength for longwavelength filtering
     moving_window_size_meters : float
         Moving window filter size in meters
+    calibration_surface_smoothing_sigma : float or None
+        Gaussian smoothing sigma (pixels) for the calibration surface.
+        ``None`` auto-selects ``window_size_pixels / 4``; ``0`` disables smoothing.
     savitzky_golay : SavitzkyGolayOptions
         Savitzky-Golay filter parameters
     fft_filter : FFTFilterOptions
@@ -198,6 +201,16 @@ class CalibrationOptions(BaseModel):
         100000.0,
         gt=0,
         description="Moving window filter size in meters",
+    )
+    calibration_surface_smoothing_sigma: float | None = Field(
+        None,
+        ge=0,
+        description=(
+            "Gaussian smoothing standard deviation (pixels) applied to the assembled "
+            "calibration surface to suppress window-boundary seam artifacts.  "
+            "``None`` (default) uses window_size_pixels / 4 automatically.  "
+            "Set to 0 to disable smoothing entirely."
+        ),
     )
     savitzky_golay: SavitzkyGolayOptions = Field(
         default_factory=SavitzkyGolayOptions,
