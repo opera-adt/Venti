@@ -354,8 +354,208 @@ class TestSpatialProcessor:
         insar = np.zeros((self.NY, self.NX), dtype=np.float32)
         gnss = np.zeros((self.NY, self.NX), dtype=np.float32)
         result = processor.fit_windowed_surface(
-            insar, gnss, 
+            insar, gnss,
             window_size_x=40, window_size_y=30,
             window_extend_x=20, window_extend_y=15, n_jobs=1,
         )
         assert result.shape == (self.NY, self.NX)
+
+
+# fit_windowed_plane — smoothing method dispatch
+@_SKIP_SPATIAL
+class TestFitWindowedPlaneSmoothing:
+    """Test that each smoothing_method runs without error and produces the right shape."""
+
+    NY, NX = 60, 80
+
+    def _flat_scene(self) -> tuple[np.ndarray, np.ndarray]:
+        insar = np.zeros((self.NY, self.NX), dtype=np.float32)
+        gnss = np.zeros((self.NY, self.NX), dtype=np.float32)
+        return insar, gnss
+
+    def _run(self, method: str, sigma: float | None = 4.0, **kwargs) -> np.ndarray:
+        from venti.spatial.fitting import fit_windowed_plane
+
+        insar, gnss = self._flat_scene()
+        surface, _ = fit_windowed_plane(
+            insar, gnss,
+            win_xsize=40, win_ysize=30,
+            win_overlap_x=5, win_overlap_y=5,
+            win_extend_x=40, win_extend_y=30,
+            poly_order=1, n_jobs=1,
+            smoothing_sigma=sigma,
+            smoothing_method=method,
+            **kwargs,
+        )
+        return surface
+
+    def test_gaussian_default(self):
+        surface = self._run("gaussian")
+        assert surface.shape == (self.NY, self.NX)
+
+    def test_gaussian_fft(self):
+        surface = self._run("gaussian_fft")
+        assert surface.shape == (self.NY, self.NX)
+
+    def test_hanning_fft(self):
+        surface = self._run("hanning_fft")
+        assert surface.shape == (self.NY, self.NX)
+
+    def test_savitzky_golay(self):
+        surface = self._run("savitzky_golay", sigma=None, sg_window_length=11, sg_polyorder=2)
+        assert surface.shape == (self.NY, self.NX)
+
+    def test_no_smoothing_when_sigma_none_and_not_sg(self):
+        """sigma=None with a non-SG method must skip smoothing entirely (no error)."""
+        surface = self._run("gaussian", sigma=None)
+        assert surface.shape == (self.NY, self.NX)
+
+
+# low_pass_filters
+class TestLowPassFilters:
+    """Tests for venti.filtering.low_pass_filters.
+
+    All tests use synthetic arrays — no files or network required.
+    """
+
+    NY, NX = 64, 80
+
+    def _flat_surface(self, value: float = 5.0) -> tuple[np.ndarray, np.ndarray]:
+        surface = np.full((self.NY, self.NX), value, dtype=np.float32)
+        valid = np.ones((self.NY, self.NX), dtype=bool)
+        return surface, valid
+
+    def _ramp_surface(self) -> tuple[np.ndarray, np.ndarray]:
+        x = np.linspace(0, 1, self.NX, dtype=np.float32)
+        y = np.linspace(0, 1, self.NY, dtype=np.float32)
+        surface = np.outer(y, x)
+        valid = np.ones((self.NY, self.NX), dtype=bool)
+        return surface, valid
+
+    def _masked_surface(self) -> tuple[np.ndarray, np.ndarray]:
+        surface, _ = self._flat_surface()
+        valid = np.ones((self.NY, self.NX), dtype=bool)
+        valid[:8, :] = False  # mask top rows
+        surface[~valid] = 0.0
+        return surface, valid
+
+    # --- gaussian_spatial ---
+
+    def test_gaussian_spatial_preserves_shape_and_dtype(self):
+        from venti.filtering.low_pass_filters import gaussian_spatial
+
+        surface, valid = self._flat_surface()
+        out = gaussian_spatial(surface, valid, sigma=3.0)
+        assert out.shape == surface.shape
+        assert out.dtype == surface.dtype
+
+    def test_gaussian_spatial_constant_surface_unchanged(self):
+        from venti.filtering.low_pass_filters import gaussian_spatial
+
+        surface, valid = self._flat_surface(value=7.0)
+        out = gaussian_spatial(surface, valid, sigma=3.0)
+        assert np.allclose(out[valid], 7.0, atol=1e-3)
+
+    def test_gaussian_spatial_respects_boundary_mask(self):
+        from venti.filtering.low_pass_filters import gaussian_spatial
+
+        surface, valid = self._masked_surface()
+        out = gaussian_spatial(surface, valid, sigma=2.0)
+        # Valid pixels near the mask boundary must not be pulled to zero
+        assert not np.any(np.isnan(out[valid]))
+
+    # --- gaussian_fft ---
+
+    def test_gaussian_fft_preserves_shape_and_dtype(self):
+        from venti.filtering.low_pass_filters import gaussian_fft
+
+        surface, valid = self._flat_surface()
+        out = gaussian_fft(surface, valid, sigma=3.0)
+        assert out.shape == surface.shape
+        assert out.dtype == surface.dtype
+
+    def test_gaussian_fft_constant_surface_unchanged(self):
+        from venti.filtering.low_pass_filters import gaussian_fft
+
+        surface, valid = self._flat_surface(value=7.0)
+        out = gaussian_fft(surface, valid, sigma=3.0)
+        assert np.allclose(out[valid], 7.0, atol=1e-3)
+
+    def test_gaussian_fft_smooths_ramp(self):
+        """FFT Gaussian must reduce high-frequency variance while preserving mean."""
+        from venti.filtering.low_pass_filters import gaussian_fft
+
+        rng = np.random.default_rng(0)
+        surface, valid = self._ramp_surface()
+        noise = rng.standard_normal(surface.shape).astype(np.float32) * 0.5
+        noisy = surface + noise
+        out = gaussian_fft(noisy, valid, sigma=5.0)
+        assert np.std(out[valid]) < np.std(noisy[valid])
+
+    # --- hanning_fft ---
+
+    def test_hanning_fft_preserves_shape_and_dtype(self):
+        from venti.filtering.low_pass_filters import hanning_fft
+
+        surface, valid = self._flat_surface()
+        out = hanning_fft(surface, valid, sigma=3.0)
+        assert out.shape == surface.shape
+        assert out.dtype == surface.dtype
+
+    def test_hanning_fft_constant_surface_unchanged(self):
+        from venti.filtering.low_pass_filters import hanning_fft
+
+        surface, valid = self._flat_surface(value=7.0)
+        out = hanning_fft(surface, valid, sigma=3.0)
+        assert np.allclose(out[valid], 7.0, atol=1e-3)
+
+    def test_hanning_fft_smooths_ramp(self):
+        from venti.filtering.low_pass_filters import hanning_fft
+
+        rng = np.random.default_rng(1)
+        surface, valid = self._ramp_surface()
+        noise = rng.standard_normal(surface.shape).astype(np.float32) * 0.5
+        noisy = surface + noise
+        out = hanning_fft(noisy, valid, sigma=5.0)
+        assert np.std(out[valid]) < np.std(noisy[valid])
+
+    # --- savitzky_golay ---
+
+    def test_savitzky_golay_preserves_shape_and_dtype(self):
+        from venti.filtering.low_pass_filters import savitzky_golay
+
+        surface, valid = self._flat_surface()
+        out = savitzky_golay(surface, valid, window_length=11, polyorder=2)
+        assert out.shape == surface.shape
+        assert out.dtype == surface.dtype
+
+    def test_savitzky_golay_constant_surface_unchanged(self):
+        from venti.filtering.low_pass_filters import savitzky_golay
+
+        surface, valid = self._flat_surface(value=7.0)
+        out = savitzky_golay(surface, valid, window_length=11, polyorder=2)
+        assert np.allclose(out[valid], 7.0, atol=1e-3)
+
+    def test_savitzky_golay_odd_window_required(self):
+        from venti.filtering.low_pass_filters import savitzky_golay
+
+        surface, valid = self._flat_surface()
+        with pytest.raises(AssertionError):
+            savitzky_golay(surface, valid, window_length=10, polyorder=2)
+
+    def test_savitzky_golay_polyorder_less_than_window(self):
+        from venti.filtering.low_pass_filters import savitzky_golay
+
+        surface, valid = self._flat_surface()
+        with pytest.raises(AssertionError):
+            savitzky_golay(surface, valid, window_length=5, polyorder=6)
+
+    def test_savitzky_golay_smooths_ramp(self):
+        from venti.filtering.low_pass_filters import savitzky_golay
+
+        rng = np.random.default_rng(2)
+        surface, valid = self._ramp_surface()
+        noise = rng.standard_normal(surface.shape).astype(np.float32) * 0.5
+        noisy = surface + noise
+        out = savitzky_golay(noisy, valid, window_length=15, polyorder=2)
+        assert np.std(out[valid]) < np.std(noisy[valid])

@@ -420,6 +420,18 @@ class CalibrationWorkflow:
         if event_mask_file is not None:
             event_mask_data = self.io_reader.read_geotiff(event_mask_file)
             event_mask = event_mask_data.data.astype(bool)
+
+            buffer_px = self.config.algorithm_parameters.calibration_options.event_mask_buffer_pixels
+            if buffer_px > 0:
+                from scipy.ndimage import binary_dilation
+
+                # Dilate the event region (False pixels) outward by buffer_px pixels
+                event_mask = ~binary_dilation(~event_mask, iterations=buffer_px)
+                logger.info(
+                    f"Event mask boundary buffered by {buffer_px} px: "
+                    f"{int((~event_mask).sum()):,} total event-region pixels"
+                )
+
             n_event_pixels = int((~event_mask).sum())
             logger.debug(
                 f"Event mask loaded from {event_mask_file.name}: "
@@ -453,7 +465,7 @@ class CalibrationWorkflow:
         # Downsample if requested
         original_shape = disp.shape
         if self.config.grid_settings.downsample_factor > 1:
-            logger.debug(
+            logger.info(
                 f"Downsampling by factor {self.config.grid_settings.downsample_factor} "
                 f"using method '{self.config.grid_settings.downsample_method}'"
             )
@@ -467,7 +479,7 @@ class CalibrationWorkflow:
                         disp_file, variable="temporal_coherence"
                     )
                     weights = coh_data.data
-                    logger.debug("Using temporal coherence as downsampling weights")
+                    logger.info("Downsampling weighted by temporal coherence")
                 except Exception as e:
                     logger.warning(
                         f"Could not load weights for downsampling: {e}. "

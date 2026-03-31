@@ -113,6 +113,44 @@ class TestCalibrationOptions:
         with pytest.raises(ValueError, match="grid_type|Input should be"):
             CalibrationOptions(grid_type="invalid")
 
+    def test_smoothing_method_default(self):
+        opts = CalibrationOptions()
+        assert opts.calibration_surface_smoothing_method == "gaussian"
+
+    def test_smoothing_method_valid_values(self):
+        for method in ("gaussian", "gaussian_fft", "hanning_fft", "savitzky_golay"):
+            opts = CalibrationOptions(calibration_surface_smoothing_method=method)
+            assert opts.calibration_surface_smoothing_method == method
+
+    def test_smoothing_method_invalid_value(self):
+        with pytest.raises(ValueError, match="Input should be"):
+            CalibrationOptions(calibration_surface_smoothing_method="box_filter")
+
+    def test_smoothing_sigma_default_is_none(self):
+        opts = CalibrationOptions()
+        assert opts.calibration_surface_smoothing_sigma is None
+
+    def test_smoothing_sigma_zero_accepted(self):
+        """Zero is the sentinel for disabling smoothing — must be accepted."""
+        opts = CalibrationOptions(calibration_surface_smoothing_sigma=0)
+        assert opts.calibration_surface_smoothing_sigma == 0
+
+    def test_smoothing_sigma_negative_rejected(self):
+        with pytest.raises(ValueError, match="greater than or equal to|Input should be"):
+            CalibrationOptions(calibration_surface_smoothing_sigma=-1.0)
+
+    def test_event_mask_buffer_default_is_zero(self):
+        opts = CalibrationOptions()
+        assert opts.event_mask_buffer_pixels == 0
+
+    def test_event_mask_buffer_custom(self):
+        opts = CalibrationOptions(event_mask_buffer_pixels=15)
+        assert opts.event_mask_buffer_pixels == 15
+
+    def test_event_mask_buffer_negative_rejected(self):
+        with pytest.raises(ValueError, match="greater than or equal to|Input should be"):
+            CalibrationOptions(event_mask_buffer_pixels=-1)
+
 
 class TestDecompositionOptions:
     """Test cases for DecompositionOptions model."""

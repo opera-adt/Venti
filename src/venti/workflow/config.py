@@ -138,6 +138,10 @@ class CalibrationOptions(BaseModel):
         Cutoff wavelength for longwavelength filtering
     moving_window_size_meters : float
         Moving window filter size in meters
+    event_mask_buffer_pixels : int
+        Number of pixels to dilate the event-mask boundary before filling.
+        Use to exclude near-boundary pixels that may be contaminated by
+        the deformation signal.  ``0`` disables buffering.
     calibration_surface_smoothing_method : str
         Post-assembly low-pass filter: ``'gaussian'`` (default), ``'gaussian_fft'``,
         ``'hanning_fft'``, or ``'savitzky_golay'``.
@@ -204,6 +208,15 @@ class CalibrationOptions(BaseModel):
         100000.0,
         gt=0,
         description="Moving window filter size in meters",
+    )
+    event_mask_buffer_pixels: int = Field(
+        0,
+        ge=0,
+        description=(
+            "Number of pixels to dilate the event-mask boundary before filling.  "
+            "Expands the excluded region to capture near-boundary pixels "
+            "contaminated by the deformation signal.  ``0`` disables buffering."
+        ),
     )
     calibration_surface_smoothing_method: Literal[
         "gaussian", "gaussian_fft", "hanning_fft", "savitzky_golay"
