@@ -166,7 +166,7 @@ python disp_cli.py preview --frame-id 8887 --start 2016-01-01 --end 2017-01-01 -
 
 ---
 
-## Running from CLI
+## Running calibration from CLI
 
 ### 1. Generate configuration templates
 
