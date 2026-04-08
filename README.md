@@ -47,6 +47,125 @@ python -m pip install -e .
 
 ---
 
+## Data Staging
+
+Before running any calibration or decomposition workflow, you need to download and
+prepare all input data for the target frame. The staging workflow handles this end-to-end.
+
+### What gets staged
+
+For a given OPERA frame ID and secondary date, staging prepares:
+
+| Step | Output | Location |
+|------|--------|----------|
+| 1. Download DISP-S1 product | OPERA NetCDF interferogram | `<output_dir>/disp_s1/` |
+| 2. Generate DEM | GLO30 GeoTIFF in WGS84 and native UTM | `<output_dir>/dem/` |
+| 3. Generate LOS geometry | LOS ENU raster + incidence angle | `<output_dir>/los/` |
+| 4. Tropospheric corrections | HRRR-based correction GeoTIFFs | `<output_dir>/tropo/` |
+| 5. UNR GNSS velocities | Per-station `.tenv8` files + `velocities.parquet` | `<output_dir>/gnss/` |
+
+DEM and LOS outputs are idempotent — re-running staging for a new date on the same
+frame reuses existing files.
+
+### CLI
+
+```bash
+cd scripts/staging
+
+# Stage all data for a single frame and date
+python stage_frame_cli.py --frame-id 8887 --date 2016-06-15
+
+# Custom output directory
+python stage_frame_cli.py --frame-id 8887 --date 2016-06-15 \
+    --output-dir /data/opera/frame_8887
+
+# Skip optional steps
+python stage_frame_cli.py --frame-id 8887 --date 2016-06-15 \
+    --skip-tropo --skip-gnss
+
+# Full options
+python stage_frame_cli.py --help
+```
+
+All CLI arguments:
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--frame-id` | required | OPERA frame identifier |
+| `--date` | required | Secondary date (YYYY-MM-DD or YYYYMMDD) |
+| `--output-dir` | `./staging` | Root directory for all outputs |
+| `--num-workers` | `4` | Parallel workers for downloads |
+| `--dem-buffer` | `10000.0` | Buffer in meters around frame for DEM |
+| `--skip-tropo` | `False` | Skip tropospheric corrections |
+| `--skip-gnss` | `False` | Skip GNSS download and velocity estimation |
+| `--gnss-reference-frame` | `IGS20` | GNSS reference frame (`IGS20` or `IGS14`) |
+| `--gnss-padding` | `0.0` | Extra meters beyond frame bounds for station search |
+| `--gnss-start-year` | `2014.0` | Earliest year used for velocity estimation |
+
+### Python API
+
+```python
+from pathlib import Path
+from venti.workflow import run_data_staging
+
+# Stage all data for a single interferogram
+run_data_staging(
+    frame_id=8887,
+    date="2016-06-15",
+    output_dir=Path("./data"),
+)
+```
+
+Skip individual steps as needed:
+
+```python
+run_data_staging(
+    frame_id=8887,
+    date="2016-06-15",
+    output_dir=Path("./data"),
+    skip_tropo=True,
+    skip_gnss=True,
+)
+```
+
+### Preview available products before staging
+
+Use `disp_cli.py` to check what products exist for a frame before downloading:
+
+```bash
+cd scripts/staging
+python disp_cli.py preview --frame-id 8887 --start 2016-01-01 --end 2017-01-01 --print-dates
+```
+
+### Output directory structure
+
+```
+<output_dir>/
+├── disp_s1/
+│   └── OPERA_L3_DISP-S1_IW_F08887_VV_*.nc
+├── dem/
+│   ├── dem_frame_8887.tif               # WGS84
+│   └── dem_frame_8887_epsg32610.tif     # native UTM
+├── los/
+│   ├── los_enu_frame_8887.tif           # 3-band ENU raster
+│   ├── incidence_angle_frame_8887.tif
+│   ├── los_east.vrt
+│   ├── los_north.vrt
+│   └── los_up.vrt
+├── tropo/
+│   ├── tropo_urls.txt
+│   ├── cropped_tropo/
+│   ├── tropo_corrections/
+│   └── tropo_corrections_{epsg}/
+└── gnss/
+    ├── grid_latlon_lookup.txt
+    ├── stations/
+    │   └── *.tenv8
+    └── velocities.parquet
+```
+
+---
+
 ## Running from CLI
 
 ### 1. Generate configuration templates

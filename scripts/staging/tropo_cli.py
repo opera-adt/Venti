@@ -16,7 +16,7 @@ from pathlib import Path
 import asf_search as asf
 import geopandas as gpd
 import numpy as np
-import requests
+import requests  # type: ignore[import-untyped]
 import rioxarray as rxr
 import xarray as xr
 from opera_utils import get_frame_bbox, get_frame_geojson

@@ -12,8 +12,7 @@ from pathlib import Path
 import geopandas as gpd
 import numpy as np
 import pandas as pd
-import requests
-import scipy.linalg
+import requests  # type: ignore[import-untyped]
 from numpy.linalg import lstsq
 from shapely.geometry import Point, box
 
@@ -22,8 +21,12 @@ logger = logging.getLogger(__name__)
 # UNR timeseries endpoints keyed by reference frame
 _UNR_URLS: dict[str, dict[str, str]] = {
     "IGS20": {
-        "grid": "https://geodesy.unr.edu/grid_timeseries/Version0.3/grid_latlon_lookup.txt",
-        "data": "https://geodesy.unr.edu/grid_timeseries/Version0.3/time_variable_gridded/IGS20/",
+        "grid": (
+            "https://geodesy.unr.edu/grid_timeseries/Version0.3/grid_latlon_lookup.txt"
+        ),
+        "data": (
+            "https://geodesy.unr.edu/grid_timeseries/Version0.3/time_variable_gridded/IGS20/"
+        ),
     },
     "IGS14": {
         "grid": "https://geodesy.unr.edu/grid_timeseries/grid_latlon_lookup.txt",
@@ -62,7 +65,10 @@ def download_grid_lookup(output_dir: Path, reference_frame: str = "IGS20") -> Pa
 
     """
     if reference_frame not in _UNR_URLS:
-        msg = f"Unsupported reference frame '{reference_frame}'. Choose from {list(_UNR_URLS)}"
+        msg = (
+            f"Unsupported reference frame '{reference_frame}'. Choose from"
+            f" {list(_UNR_URLS)}"
+        )
         raise ValueError(msg)
 
     url = _UNR_URLS[reference_frame]["grid"]
@@ -112,7 +118,9 @@ def find_stations_in_bounds(
     )
     gdf = gpd.GeoDataFrame(
         df,
-        geometry=[Point(lon, lat) for lon, lat in zip(df["lon"], df["lat"])],
+        geometry=[
+            Point(lon, lat) for lon, lat in zip(df["lon"], df["lat"], strict=False)
+        ],
         crs="EPSG:4326",
     )
     gdf_utm = gdf.to_crs(epsg=utm_epsg)
@@ -264,15 +272,17 @@ def read_epoch_displacements(
         ref_row = df.iloc[(df["year"] - ref_date).abs().argmin()]
         sec_row = df.iloc[(df["year"] - sec_date).abs().argmin()]
 
-        rows.append({
-            "id": station_id,
-            "deast": ref_row["east"] - sec_row["east"],
-            "dnorth": ref_row["north"] - sec_row["north"],
-            "dup": ref_row["up"] - sec_row["up"],
-            "dsigma_e": np.hypot(ref_row["sigma_e"], sec_row["sigma_e"]),
-            "dsigma_n": np.hypot(ref_row["sigma_n"], sec_row["sigma_n"]),
-            "dsigma_u": np.hypot(ref_row["sigma_u"], sec_row["sigma_u"]),
-        })
+        rows.append(
+            {
+                "id": station_id,
+                "deast": ref_row["east"] - sec_row["east"],
+                "dnorth": ref_row["north"] - sec_row["north"],
+                "dup": ref_row["up"] - sec_row["up"],
+                "dsigma_e": np.hypot(ref_row["sigma_e"], sec_row["sigma_e"]),
+                "dsigma_n": np.hypot(ref_row["sigma_n"], sec_row["sigma_n"]),
+                "dsigma_u": np.hypot(ref_row["sigma_u"], sec_row["sigma_u"]),
+            }
+        )
 
     diff_df = pd.DataFrame(rows).set_index("id")
     return diff_df.join(station_gdf[["geometry"]], how="inner")

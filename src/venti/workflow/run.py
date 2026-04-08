@@ -382,6 +382,89 @@ def decompose_timeseries(
     )
 
 
+def run_data_staging(
+    frame_id: int,
+    date: str,
+    output_dir: Path,
+    num_workers: int = 4,
+    dem_buffer: float = 10_000.0,
+    skip_tropo: bool = False,
+    skip_gnss: bool = False,
+    gnss_reference_frame: str = "IGS20",
+    gnss_padding: float = 0.0,
+    gnss_start_year: float = 2014.0,
+) -> None:
+    """Stage all ancillary data for a single OPERA DISP-S1 frame.
+
+    Downloads the DISP-S1 product and all ancillary data needed for downstream
+    calibration: DEM, LOS geometry, tropospheric corrections, and UNR GNSS
+    velocities. DEM and LOS outputs are idempotent — existing files are reused.
+
+    Parameters
+    ----------
+    frame_id : int
+        OPERA frame identifier.
+    date : str
+        Secondary date of the interferogram to stage (YYYY-MM-DD or YYYYMMDD).
+    output_dir : Path
+        Root directory for all staged outputs.
+    num_workers : int, optional
+        Number of parallel workers for downloads and processing. Default is 4.
+    dem_buffer : float, optional
+        Buffer in meters around the frame extent for DEM generation.
+        Default is 10,000 m (10 km).
+    skip_tropo : bool, optional
+        Skip tropospheric correction processing. Default is False.
+    skip_gnss : bool, optional
+        Skip UNR GNSS download and velocity estimation. Default is False.
+    gnss_reference_frame : str, optional
+        GNSS reference frame for UNR data (``'IGS20'`` or ``'IGS14'``).
+        Default is ``'IGS20'``.
+    gnss_padding : float, optional
+        Extra padding in meters beyond frame bounds when searching for GNSS
+        stations. Default is ``0.0``.
+    gnss_start_year : float, optional
+        Exclude GNSS observations before this decimal year when estimating
+        velocities. Default is ``2014.0``.
+
+    Examples
+    --------
+    Stage a frame with all ancillary data::
+
+        run_data_staging(
+            frame_id=8887,
+            date="2016-06-15",
+            output_dir=Path("./data"),
+        )
+
+    Stage without tropospheric corrections or GNSS::
+
+        run_data_staging(
+            frame_id=8887,
+            date="2016-06-15",
+            output_dir=Path("./data"),
+            skip_tropo=True,
+            skip_gnss=True,
+        )
+
+    """
+    from .stage_frame_data import stage_frame
+
+    stage_frame(
+        frame_id=frame_id,
+        date=date,
+        output_dir=output_dir,
+        num_workers=num_workers,
+        dem_buffer=dem_buffer,
+        skip_tropo=skip_tropo,
+        skip_gnss=skip_gnss,
+        gnss_reference_frame=gnss_reference_frame,
+        gnss_padding=gnss_padding,
+        gnss_start_year=gnss_start_year,
+    )
+    logger.info("Data staging complete for frame %d on %s", frame_id, date)
+
+
 def calibrate_command(config_file: str) -> None:
     """Run calibration workflow from YAML config file.
 

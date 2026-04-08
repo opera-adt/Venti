@@ -5,8 +5,12 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
+
+if TYPE_CHECKING:
+    import geopandas as gpd
 
 from .los import InterpolationMethod, RbfFunction, project_to_los
 from .unr import (
@@ -69,7 +73,7 @@ class GNSSReference:
     utm_epsg: int | None = None
 
     station_files: list[Path] = field(default_factory=list, init=False)
-    station_gdf: object = field(default=None, init=False)  # gpd.GeoDataFrame | None
+    station_gdf: gpd.GeoDataFrame | None = field(default=None, init=False)
 
     def download_stations(self) -> int:
         """Download all GNSS stations within the configured bounds.
@@ -130,16 +134,19 @@ class GNSSReference:
         for path in self.station_files:
             station_id = int(path.name.split("_")[0])
             ve, vn, vu, se, sn, su = calculate_station_velocity(path, start_year)
-            rows.append({
-                "id": station_id,
-                "deast": ve,
-                "dnorth": vn,
-                "dup": vu,
-                "dsigma_e": se,
-                "dsigma_n": sn,
-                "dsigma_u": su,
-            })
+            rows.append(
+                {
+                    "id": station_id,
+                    "deast": ve,
+                    "dnorth": vn,
+                    "dup": vu,
+                    "dsigma_e": se,
+                    "dsigma_n": sn,
+                    "dsigma_u": su,
+                }
+            )
 
+        assert self.station_gdf is not None, "Call download_stations() first"
         df = pd.DataFrame(rows).set_index("id")
         return gpd.GeoDataFrame(df.join(self.station_gdf[["geometry"]], how="inner"))
 
@@ -166,7 +173,8 @@ class GNSSReference:
         netcdf_file : str or Path
             NetCDF file defining the output raster grid.
         start_year : float, optional
-            Earliest observation year used in velocity estimation, by default ``2014.0``.
+            Earliest observation year used in velocity estimation,
+            by default ``2014.0``.
         method : {'rbf', 'griddata'}, optional
             Spatial interpolation method, by default ``'rbf'``.
         rbf_function : str, optional
@@ -178,12 +186,16 @@ class GNSSReference:
             GNSS LOS velocity field, shape ``(ny, nx)``, in mm/yr.
 
         """
-        assert self.station_files, "Call download_stations() first"  # noqa: S101
+        assert self.station_files, "Call download_stations() first"
         velocity_gdf = self._build_velocity_gdf(start_year)
         return project_to_los(
-            los_east, los_north, los_up,
-            netcdf_file, velocity_gdf,
-            method=method, rbf_function=rbf_function,
+            los_east,
+            los_north,
+            los_up,
+            netcdf_file,
+            velocity_gdf,
+            method=method,
+            rbf_function=rbf_function,
         )
 
     def compute_displacement_los(
@@ -224,14 +236,18 @@ class GNSSReference:
             GNSS LOS displacement field, shape ``(ny, nx)``.
 
         """
-        assert self.station_files, "Call download_stations() first"  # noqa: S101
-        assert self.station_gdf is not None, "Call download_stations() first"  # noqa: S101
+        assert self.station_files, "Call download_stations() first"
+        assert self.station_gdf is not None, "Call download_stations() first"
 
         disp_gdf = read_epoch_displacements(
             self.station_files, ref_date, sec_date, self.station_gdf
         )
         return project_to_los(
-            los_east, los_north, los_up,
-            netcdf_file, disp_gdf,
-            method=method, rbf_function=rbf_function,
+            los_east,
+            los_north,
+            los_up,
+            netcdf_file,
+            disp_gdf,
+            method=method,
+            rbf_function=rbf_function,
         )

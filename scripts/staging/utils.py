@@ -11,7 +11,7 @@ from datetime import datetime
 from pathlib import Path
 
 import geopandas as gpd
-import requests
+import requests  # type: ignore[import-untyped]
 from shapely.geometry import shape
 
 logger = logging.getLogger(__name__)
