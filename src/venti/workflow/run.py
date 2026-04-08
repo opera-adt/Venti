@@ -1,12 +1,9 @@
-"""Main workflow runner for InSAR displacement processing.
+"""Main workflow runner for InSAR displacement calibration.
 
 This module provides workflow execution functions for:
-1. Calibration: Calibrating displacement products using GNSS reference data
-2. Decomposition: Converting LOS displacement to ENU components
-
-Note: The calibration workflow wraps the CalibrationWorkflow class
-defined in calibration.py. It maintains backward compatibility with the functional
-API while using the object-oriented implementation under the hood.
+1. Data staging: Downloading and preparing ancillary data for a given OPERA frame
+2. Calibration: Calibrating displacement products using GNSS reference data
+3. Decomposition: Converting LOS displacement to ENU components
 """
 
 from __future__ import annotations

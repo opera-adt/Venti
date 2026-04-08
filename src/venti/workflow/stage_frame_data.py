@@ -27,7 +27,6 @@ import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-import pandas as pd
 from opera_utils import get_frame_bbox
 
 from venti.gnss.unr import (
@@ -37,22 +36,12 @@ from venti.gnss.unr import (
     find_stations_in_bounds,
 )
 
+logger = logging.getLogger(__name__)
+
 # Staging CLI scripts live outside the package; locate them relative to the repo root.
 _STAGING_DIR = (
     Path(__file__).resolve().parent.parent.parent.parent / "scripts" / "staging"
 )
-sys.path.insert(0, str(_STAGING_DIR))
-
-from dem_cli import generate_frame_dem  # noqa: E402
-from disp_cli import download_frame_products  # noqa: E402
-from los_cli import (  # noqa: E402
-    generate_incidence_angle_raster,
-    generate_los_enu_raster,
-)
-from tropo_cli import process_tropo_from_file  # noqa: E402
-from utils import parse_date  # noqa: E402
-
-logger = logging.getLogger(__name__)
 
 
 def _find_disp_file(disp_dir: Path, frame_id: int) -> Path:
@@ -220,8 +209,10 @@ def download_gnss_data(
         msg = "Velocity estimation failed for all stations."
         raise RuntimeError(msg)
 
+    import geopandas as gpd
+
     velocities_path = output_dir / "velocities.parquet"
-    pd.DataFrame(rows).to_parquet(velocities_path, index=False)
+    gpd.GeoDataFrame(rows, geometry="geometry").to_parquet(velocities_path, index=False)
     logger.info("Velocities for %d stations saved to %s", len(rows), velocities_path)
 
     return velocities_path
@@ -298,6 +289,13 @@ def stage_frame(
         )
 
     """
+    sys.path.insert(0, str(_STAGING_DIR))
+    from dem_cli import generate_frame_dem
+    from disp_cli import download_frame_products
+    from los_cli import generate_incidence_angle_raster, generate_los_enu_raster
+    from tropo_cli import process_tropo_from_file
+    from utils import parse_date
+
     sec_date = parse_date(date)
     assert sec_date is not None
 

@@ -1,4 +1,4 @@
-"""Object-oriented calibration workflow for InSAR displacement products.
+"""Calibration workflow for InSAR displacement products.
 
 This module provides a high-level CalibrationWorkflow class that orchestrates
 the entire calibration process using dataclasses and object composition.
@@ -26,7 +26,6 @@ logger = logging.getLogger(__name__)
 
 # Half-wavelength for Sentinel-1 C-band in mm: λ/2 = 0.0555/2 * 1000
 _WAVELENGTH_MM: float = 0.0555 / 2 * 1000
-
 
 
 @dataclass
@@ -113,7 +112,9 @@ class CalibrationWorkflow:
         # same for functions imported from utils, mainly downsample and upsample
 
         # Create output directory
-        self.config.run_config.product_path_group.product_path.mkdir(parents=True, exist_ok=True)
+        self.config.run_config.product_path_group.product_path.mkdir(
+            parents=True, exist_ok=True
+        )
 
         # Initialize components
         self.io_reader = RasterReader()
@@ -212,7 +213,8 @@ class CalibrationWorkflow:
         Parameters
         ----------
         mask : np.ndarray
-            Valid pixel mask
+            Boolean valid-pixel mask (True = valid). Masked pixels are excluded
+            from auto-selection by zeroing their coherence before scoring.
 
         Returns
         -------
@@ -227,7 +229,10 @@ class CalibrationWorkflow:
             )
             return self.config.input_options.reference_point
 
-        # Compute average coherence for auto-selection
+        import tempfile
+
+        import rasterio
+
         from .utils import compute_average_temporal_coherence
 
         disp_files = sorted(self.config.input_options.input_files.glob("*.nc"))
@@ -237,9 +242,30 @@ class CalibrationWorkflow:
             variable="temporal_coherence",
         )
 
+        # Zero out invalid pixels so they cannot be selected as reference
+        with rasterio.open(coherence_file) as src:
+            profile = src.profile.copy()
+            coherence = src.read(1)
+
+        valid_mask = mask.squeeze().astype(bool)
+        assert coherence.shape == valid_mask.shape, (
+            f"Coherence shape {coherence.shape} does not match "
+            f"mask shape {valid_mask.shape}"
+        )
+        coherence_masked = np.where(valid_mask, coherence, 0.0).astype(profile["dtype"])
+
         from opera_utils.disp import rebase_reference
 
-        ref_point = rebase_reference.find_reference_point(coherence_file)
+        with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp:
+            masked_path = Path(tmp.name)
+
+        try:
+            with rasterio.open(masked_path, "w", **profile) as dst:
+                dst.write(coherence_masked, 1)
+            ref_point = rebase_reference.find_reference_point(masked_path)
+        finally:
+            masked_path.unlink(missing_ok=True)
+
         logger.info(f"Auto-selected reference point: {ref_point}")
         return ref_point
 
@@ -421,7 +447,9 @@ class CalibrationWorkflow:
             event_mask_data = self.io_reader.read_geotiff(event_mask_file)
             event_mask = event_mask_data.data.astype(bool)
 
-            buffer_px = self.config.algorithm_parameters.calibration_options.event_mask_buffer_pixels
+            buffer_px = (
+                self.config.algorithm_parameters.calibration_options.event_mask_buffer_pixels
+            )
             if buffer_px > 0:
                 from scipy.ndimage import binary_dilation
 
@@ -523,7 +551,8 @@ class CalibrationWorkflow:
         smoothing_method = cal_opts.calibration_surface_smoothing_method
         cfg_sigma = cal_opts.calibration_surface_smoothing_sigma
         if cfg_sigma is None:
-            # Default: 1/8 of the smaller window dimension suppresses seams without over-smoothing
+            # Default: 1/8 of the smaller window dimension suppresses seams
+            # without over-smoothing.
             smoothing_sigma: float | None = min(win_x_ds, win_y_ds) / 8
         elif cfg_sigma == 0:
             smoothing_sigma = None
@@ -546,7 +575,9 @@ class CalibrationWorkflow:
 
         # Upsample calibration surface if needed
         if self.config.grid_settings.downsample_factor > 1:
-            calibration_surface_full = upsample_array(calibration_surface, original_shape)
+            calibration_surface_full = upsample_array(
+                calibration_surface, original_shape
+            )
         else:
             calibration_surface_full = calibration_surface
 
@@ -565,13 +596,13 @@ class CalibrationWorkflow:
             suffix += "_nowrap"
 
         output_file = (
-            self.config.run_config.product_path_group.product_path / f"{disp_file.stem}{suffix}.tif"
+            self.config.run_config.product_path_group.product_path
+            / f"{disp_file.stem}{suffix}.tif"
         )
 
         # Save
         description = (
-            f"Calibration surface ({self.config.grid_settings.grid_type} GNSS"
-            " model)"
+            f"Calibration surface ({self.config.grid_settings.grid_type} GNSS model)"
         )
         if tropo_file is not None:
             description += " with tropospheric correction"
@@ -707,7 +738,8 @@ class CalibrationWorkflow:
         ----------
         max_files : int or None, optional
             Processing only the first ``max_files`` displacement files.
-            Set the number of displacement files to calibrate. Default is None (process all files).
+            Set the number of displacement files to calibrate.
+            Default is None (process all files).
 
         Returns
         -------
@@ -793,7 +825,10 @@ class CalibrationWorkflow:
         logger.info(f"Processed: {self.state.n_files_processed}")
         logger.info(f"Failed: {self.state.n_files_failed}")
         logger.info(f"Success rate: {self.state.success_rate:.1f}%")
-        logger.info(f"Output directory: {self.config.run_config.product_path_group.product_path}")
+        logger.info(
+            "Output directory:"
+            f" {self.config.run_config.product_path_group.product_path}"
+        )
 
         return self.state
 
