@@ -12,15 +12,24 @@ logger = logging.getLogger(__name__)
 
 
 def _weighted_lscov(
-    A: np.ndarray,
+    design_matrix: np.ndarray,
     b: np.ndarray,
     weights: np.ndarray | None = None,
-) -> tuple[np.ndarray, np.ndarray, float, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[
+    np.ndarray,
+    np.ndarray,
+    float,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+]:
     """Weighted least-squares via QR factorisation (port of MATLAB ``lscov``).
 
     Parameters
     ----------
-    A : np.ndarray
+    design_matrix : np.ndarray
         Design matrix of shape ``(n_obs, n_params)``.
     b : np.ndarray
         Observation vector of length ``n_obs``.
@@ -51,13 +60,13 @@ def _weighted_lscov(
         weights = np.ones(b.shape)
 
     b = b[:, np.newaxis]
-    n_obs, n_x = A.shape
+    n_obs, n_x = design_matrix.shape
     n_r = n_obs - n_x
 
-    if spu.issparse(A):
-        A = A.toarray()
+    if spu.issparse(design_matrix):
+        design_matrix = design_matrix.toarray()
 
-    Aw = A * np.sqrt(weights[:, np.newaxis])
+    Aw = design_matrix * np.sqrt(weights[:, np.newaxis])
     Bw = b * np.sqrt(weights[:, np.newaxis])
 
     Q, R, perm = scipy.linalg.qr(Aw, mode="economic", pivoting=True)
@@ -87,6 +96,10 @@ def _weighted_lscov(
     stdx = np.sqrt(mse * np.diag(Qxx))
     res = wres / np.sqrt(weights[:, np.newaxis])
     obs_hat = Q_mat @ z / np.sqrt(weights[:, np.newaxis])
-    Qcov = A @ (Qxx / mse) @ A.T if n_r > 0 else np.zeros(Qxx.shape)
+    Qcov = (
+        design_matrix @ (Qxx / mse) @ design_matrix.T
+        if n_r > 0
+        else np.zeros(Qxx.shape)
+    )
 
     return x, stdx, mse, Qxx, res, wres, obs_hat, Qcov

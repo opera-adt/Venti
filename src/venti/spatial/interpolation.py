@@ -76,7 +76,11 @@ def fill_masked_region(
     filled = data.copy()
     filled[fill_region] = data[nearest[0][fill_region], nearest[1][fill_region]]
     return filled
-RbfFunction = Literal["multiquadric", "inverse", "gaussian", "linear", "cubic", "quintic", "thin_plate"]
+
+
+RbfFunction = Literal[
+    "multiquadric", "inverse", "gaussian", "linear", "cubic", "quintic", "thin_plate"
+]
 GriddataMethod = Literal["linear", "nearest", "cubic"]
 
 
@@ -102,9 +106,10 @@ def _regular_grid_interpolator_from_ds(
     x = np.asarray(ds["x"].values)
     y = np.asarray(ds["y"].values)
 
-    assert arr.shape == (y.size, x.size), (  # noqa: S101
-        f"Array shape {arr.shape} must match (len(y)={y.size}, len(x)={x.size})"
-    )
+    assert arr.shape == (
+        y.size,
+        x.size,
+    ), f"Array shape {arr.shape} must match (len(y)={y.size}, len(x)={x.size})"
 
     if np.any(np.diff(y) < 0):
         y = y[::-1]

@@ -116,7 +116,9 @@ def run_command(config_file: str, log_level: str = "INFO") -> None:
 
         logger.info("Configuration loaded successfully")
         logger.info(f"  Input directory: {config.input_options.input_files}")
-        logger.info(f"  Output directory: {config.run_config.product_path_group.product_path}")
+        logger.info(
+            f"  Output directory: {config.run_config.product_path_group.product_path}"
+        )
         logger.info(f"  Grid type: {config.grid_settings.grid_type}")
         logger.info(f"  Reference frame: {config.grid_settings.reference_frame}")
 
@@ -162,7 +164,8 @@ def run_single_command(
     ::
 
         venti run-single runconfig.yaml /data/disp/epoch_001.nc
-        venti run-single runconfig.yaml /data/disp/epoch_001.nc --tropo-file /data/tropo/tropo_001.tif
+        venti run-single runconfig.yaml /data/disp/epoch_001.nc \
+            --tropo-file /data/tropo/tropo_001.tif
         venti run-single runconfig.yaml /data/disp/epoch_001.nc --log-level DEBUG
 
     """

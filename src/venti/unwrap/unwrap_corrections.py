@@ -349,6 +349,19 @@ class UnwrapCorrector:
         # Perform watershed segmentation
         labeled_regions, valid_labels = self._watershed_segmentation(scaled_disp, mask)
 
+        if valid_labels.size == 0:
+            logger.warning(
+                "No valid regions found after watershed segmentation "
+                f"(min_region_area={self.min_region_area}). "
+                "Returning input displacement unchanged."
+            )
+            self.labeled_regions_ = labeled_regions
+            self.valid_labels_ = valid_labels
+            self.medians_ = np.array([], dtype=np.float32)
+            self.unwrap_cycles_ = np.array([], dtype=np.int32)
+            self.n_regions_ = 0
+            return np.ma.masked_array(input_disp, mask=disp_mask)
+
         # Compute regional medians
         medians = self._compute_regional_medians(
             input_disp, labeled_regions, valid_labels

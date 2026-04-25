@@ -15,8 +15,8 @@ __all__ = [
     "SpatialProcessor",
     "_fill_gaps",
     "_get_residual_mask",
-    "interpolate_rbf",
-    "interpolate_griddata",
     "downsample_array",
+    "interpolate_griddata",
+    "interpolate_rbf",
     "upsample_array",
 ]

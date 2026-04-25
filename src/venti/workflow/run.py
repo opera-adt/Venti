@@ -462,6 +462,98 @@ def run_data_staging(
     logger.info("Data staging complete for frame %d on %s", frame_id, date)
 
 
+def run_data_staging_window(
+    frame_id: int,
+    start: str,
+    end: str,
+    output_dir: Path,
+    num_workers: int = 4,
+    dem_buffer: float = 10_000.0,
+    skip_tropo: bool = False,
+    skip_gnss: bool = False,
+    gnss_reference_frame: str = "IGS20",
+    gnss_padding: float = 0.0,
+    gnss_start_year: float = 2014.0,
+) -> list[Path]:
+    """Stage all ancillary data for multiple DISP-S1 products in a time window.
+
+    Downloads every DISP-S1 product whose secondary date falls within
+    ``[start, end]`` and generates all ancillary data required for downstream
+    calibration.  Frame-level assets (DEM, LOS, GNSS) are produced once and
+    shared across all products; tropospheric corrections are batched over all
+    unique epoch sensing times and combined into per-product differential files.
+
+    Parameters
+    ----------
+    frame_id : int
+        OPERA frame identifier.
+    start : str
+        Start of the secondary-date window (YYYY-MM-DD or YYYYMMDD).
+    end : str
+        End of the secondary-date window (YYYY-MM-DD or YYYYMMDD).
+    output_dir : Path
+        Root directory for all staged outputs.
+    num_workers : int, optional
+        Number of parallel workers for downloads and processing. Default is 4.
+    dem_buffer : float, optional
+        Buffer in metres around the frame extent for DEM generation.
+        Default is 10,000 m (10 km).
+    skip_tropo : bool, optional
+        Skip tropospheric correction processing. Default is False.
+    skip_gnss : bool, optional
+        Skip UNR GNSS download and velocity estimation. Default is False.
+    gnss_reference_frame : str, optional
+        GNSS reference frame for UNR data (``'IGS20'`` or ``'IGS14'``).
+        Default is ``'IGS20'``.
+    gnss_padding : float, optional
+        Extra padding in metres beyond frame bounds when searching for GNSS
+        stations. Default is ``0.0``.
+    gnss_start_year : float, optional
+        Exclude GNSS observations before this decimal year when estimating
+        velocities. Default is ``2014.0``.
+
+    Returns
+    -------
+    list[Path]
+        Paths of the downloaded DISP-S1 NetCDF files, sorted by secondary date.
+
+    Examples
+    --------
+    Stage all products for a frame in a given year::
+
+        run_data_staging_window(
+            frame_id=8887,
+            start="2016-06-01",
+            end="2016-12-31",
+            output_dir=Path("./data"),
+        )
+
+    """
+    from .stage_frame_data import stage_window
+
+    disp_files = stage_window(
+        frame_id=frame_id,
+        start=start,
+        end=end,
+        output_dir=output_dir,
+        num_workers=num_workers,
+        dem_buffer=dem_buffer,
+        skip_tropo=skip_tropo,
+        skip_gnss=skip_gnss,
+        gnss_reference_frame=gnss_reference_frame,
+        gnss_padding=gnss_padding,
+        gnss_start_year=gnss_start_year,
+    )
+    logger.info(
+        "Data staging complete: %d products for frame %d (%s to %s)",
+        len(disp_files),
+        frame_id,
+        start,
+        end,
+    )
+    return disp_files
+
+
 def calibrate_command(config_file: str) -> None:
     """Run calibration workflow from YAML config file.
 

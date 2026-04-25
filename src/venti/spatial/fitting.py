@@ -48,20 +48,20 @@ from .gap_filling import (
 )
 
 __all__ = [
-    "_weighted_lscov",
-    "_design_matrix_poly",
     "_POLY_N_COEFF",
-    "_calc_plane_values",
     "_calc_plane_uncertainty",
-    "_fit_plane",
+    "_calc_plane_values",
+    "_design_matrix_poly",
+    "_extend_window",
     "_fill_gaps",
     "_fill_gaps_gdal",
     "_fill_gaps_scipy",
-    "_get_residual_mask",
     "_find_data_extent",
-    "_get_sliding_windows",
-    "_extend_window",
+    "_fit_plane",
     "_get_coordinate_grid",
+    "_get_residual_mask",
+    "_get_sliding_windows",
     "_process_window",
+    "_weighted_lscov",
     "fit_windowed_plane",
 ]

@@ -30,6 +30,7 @@ __all__ = [
     "load_config",
     "run_calibration_workflow",
     "run_data_staging",
+    "run_data_staging_window",
     "run_decomposition_workflow",
     # Functional API
     "run_workflow",
@@ -120,6 +121,12 @@ def __getattr__(name: str):
 
         globals()["run_data_staging"] = run_data_staging
         return run_data_staging
+
+    if name == "run_data_staging_window":
+        from .run import run_data_staging_window
+
+        globals()["run_data_staging_window"] = run_data_staging_window
+        return run_data_staging_window
 
     msg = f"module {__name__!r} has no attribute {name!r}"
     raise AttributeError(msg)

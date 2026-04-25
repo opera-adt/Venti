@@ -28,36 +28,40 @@ try:
 except ImportError:
     HAS_XARRAY = False
 
-from venti.gnss.los import (
-    _regular_grid_interpolator_from_ds,
-    _sample_on_points,
-    interpolate_griddata,
-    interpolate_rbf,
-    project_to_los,
-)
+from venti.gnss.los import project_to_los
 from venti.gnss.unr import (
     calculate_station_velocity,
     find_stations_in_bounds,
     read_epoch_displacements,
+)
+from venti.spatial.interpolation import (
+    _regular_grid_interpolator_from_ds,
+    _sample_on_points,
+    interpolate_griddata,
+    interpolate_rbf,
 )
 
 
 # Helpers shared across tests
 def _write_tenv8(path: Path, years: np.ndarray, east, north, up, sigma=1e-3) -> None:
     """Write a minimal UNR .tenv8-style whitespace-delimited station file."""
-    rows = np.column_stack([
-        years,
-        east,
-        north,
-        up,
-        np.full_like(years, sigma),
-        np.full_like(years, sigma),
-        np.full_like(years, sigma),
-    ])
+    rows = np.column_stack(
+        [
+            years,
+            east,
+            north,
+            up,
+            np.full_like(years, sigma),
+            np.full_like(years, sigma),
+            np.full_like(years, sigma),
+        ]
+    )
     np.savetxt(path, rows, fmt="%.6f")
 
 
-def _make_netcdf(path: Path, nx: int = 20, ny: int = 15) -> tuple[np.ndarray, np.ndarray]:
+def _make_netcdf(
+    path: Path, nx: int = 20, ny: int = 15
+) -> tuple[np.ndarray, np.ndarray]:
     """Create a minimal NetCDF with x/y UTM coords; return (x, y) arrays."""
     x = np.linspace(400_000, 500_000, nx, dtype=np.float32)
     y = np.linspace(3_800_000, 3_900_000, ny, dtype=np.float32)
@@ -81,7 +85,7 @@ def _make_gnss_gdf(
             "dnorth": dnorth,
             "dup": dup,
         },
-        geometry=[Point(x, y) for x, y in zip(x_coords, y_coords)],
+        geometry=[Point(x, y) for x, y in zip(x_coords, y_coords, strict=False)],
         crs="EPSG:32611",
     )
 
@@ -100,11 +104,14 @@ class TestFindStationsInBounds:
         with tempfile.TemporaryDirectory() as tmp:
             lookup = Path(tmp) / "grid_latlon_lookup.txt"
             # UTM zone 11N: approx lon -120..-114, lat 34..36
-            self._write_lookup(lookup, [
-                (1, -118.0, 35.0),   # inside: easting~409k, northing~3870k
-                (2, -117.5, 34.5),   # inside: easting~455k, northing~3814k
-                (3, -110.0, 35.0),   # outside (east)
-            ])
+            self._write_lookup(
+                lookup,
+                [
+                    (1, -118.0, 35.0),  # inside: easting~409k, northing~3870k
+                    (2, -117.5, 34.5),  # inside: easting~455k, northing~3814k
+                    (3, -110.0, 35.0),  # outside (east)
+                ],
+            )
             # bounds in UTM zone 11N metres (S, N, W, E)
             bounds = (3_800_000, 3_900_000, 350_000, 500_000)
             result = find_stations_in_bounds(lookup, bounds, utm_epsg=32611)
@@ -248,7 +255,7 @@ class TestRegularGridInterpolatorFromDs:
     def test_handles_decreasing_y(self):
         """y axis decreasing (north-up raster) must be flipped internally."""
         x = np.linspace(0, 10, 5)
-        y = np.linspace(10, 0, 4)   # decreasing
+        y = np.linspace(10, 0, 4)  # decreasing
         arr = np.ones((4, 5), dtype=np.float32)
         ds = xr.Dataset({"v": (["y", "x"], arr)}, coords={"x": x, "y": y})
         interp = _regular_grid_interpolator_from_ds(ds, arr)
@@ -274,7 +281,9 @@ class TestSampleOnPoints:
         y = np.array([0.0, 10.0])
         arr = np.ones((2, 2), dtype=np.float32)
         ds = xr.Dataset({"v": (["y", "x"], arr)}, coords={"x": x, "y": y})
-        vals = _sample_on_points(ds, arr, pts_x=np.array([999.0]), pts_y=np.array([999.0]))
+        vals = _sample_on_points(
+            ds, arr, pts_x=np.array([999.0]), pts_y=np.array([999.0])
+        )
         assert np.isnan(vals[0])
 
 
@@ -382,8 +391,12 @@ class TestProjectToLos:
             # Use a 3x3 grid of stations to constrain the RBF across the full domain
             xi = [x[0], x[4], x[9]]
             yi = [y[0], y[3], y[7]]
-            x_coords = np.array([xi[c] for r in range(3) for c in range(3)], dtype=np.float32)
-            y_coords = np.array([yi[r] for r in range(3) for c in range(3)], dtype=np.float32)
+            x_coords = np.array(
+                [xi[c] for r in range(3) for c in range(3)], dtype=np.float32
+            )
+            y_coords = np.array(
+                [yi[r] for r in range(3) for c in range(3)], dtype=np.float32
+            )
             gdf = _make_gnss_gdf(
                 x_coords=x_coords,
                 y_coords=y_coords,

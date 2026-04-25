@@ -222,14 +222,17 @@ def _process_window(
         return win_index, None, None
 
     try:
-        plane, plane_std = _fit_plane(res, win_lons, win_lats, order=poly_order, decimate=50)
+        plane, plane_std = _fit_plane(
+            res, win_lons, win_lats, order=poly_order, decimate=50
+        )
         mask2 = np.ma.getmaskarray(np.ma.masked_invalid(res))
         filled_plane = np.ma.masked_array(plane[pad], mask=mask2[pad]).filled(0)
         filled_std = np.ma.masked_array(plane_std[pad], mask=mask2[pad]).filled(0)
-        return win_index, filled_plane, filled_std
     except Exception:
         logger.debug("Skipping window %s", win_index, exc_info=True)
         return win_index, None, None
+    else:
+        return win_index, filled_plane, filled_std
 
 
 def fit_windowed_plane(
@@ -241,7 +244,7 @@ def fit_windowed_plane(
     win_overlap_y: int,
     win_extend_x: int,
     win_extend_y: int,
-    gnss_los_std: np.ndarray | None = None,
+    gnss_los_std: np.ndarray | None = None,  # noqa: ARG001
     poly_order: float = 1.5,
     n_jobs: int = -1,
     smoothing_sigma: float | None = None,
@@ -318,13 +321,16 @@ def fit_windowed_plane(
 
     """
     from ..spatial.gap_filling import _fill_gaps, _get_residual_mask
+
     outlier_mask = _get_residual_mask(insar_data, gnss_los)
     invalid_mask = np.ma.masked_invalid(insar_data).mask
     length, width = insar_data.shape
 
     logger.info(
         "Fitting windowed calibration plane: %d x %d px windows, poly_order=%s",
-        win_ysize, win_xsize, poly_order,
+        win_ysize,
+        win_xsize,
+        poly_order,
     )
 
     insar_filled = np.ma.masked_array(insar_data, mask=outlier_mask).filled(0)
@@ -368,8 +374,14 @@ def fit_windowed_plane(
 
         results = Parallel(n_jobs=n_jobs)(
             delayed(_process_window)(
-                ix, _insar_mm, _gnss_mm,
-                win_extend_y, win_extend_x, length, width, poly_order,
+                ix,
+                _insar_mm,
+                _gnss_mm,
+                win_extend_y,
+                win_extend_x,
+                length,
+                width,
+                poly_order,
             )
             for ix in all_windows
         )
@@ -400,7 +412,9 @@ def fit_windowed_plane(
     nonzero_std = weight_std > 0
     cal_std[nonzero_std] /= weight_std[nonzero_std]
 
-    _apply_smoothing = smoothing_sigma is not None or smoothing_method == "savitzky_golay"
+    _apply_smoothing = (
+        smoothing_sigma is not None or smoothing_method == "savitzky_golay"
+    )
     if _apply_smoothing:
         from .low_pass_filters import (
             gaussian_fft,
@@ -419,9 +433,13 @@ def fit_windowed_plane(
             if nonzero_std.any():
                 cal_std = hanning_fft(cal_std, nonzero_std, smoothing_sigma)  # type: ignore[arg-type]
         elif smoothing_method == "savitzky_golay":
-            cal_surface = savitzky_golay(cal_surface, valid, sg_window_length, sg_polyorder)
+            cal_surface = savitzky_golay(
+                cal_surface, valid, sg_window_length, sg_polyorder
+            )
             if nonzero_std.any():
-                cal_std = savitzky_golay(cal_std, nonzero_std, sg_window_length, sg_polyorder)
+                cal_std = savitzky_golay(
+                    cal_std, nonzero_std, sg_window_length, sg_polyorder
+                )
         else:
             # default: spatial Gaussian
             cal_surface = gaussian_spatial(cal_surface, valid, smoothing_sigma)  # type: ignore[arg-type]

@@ -24,6 +24,7 @@ from opera_utils.tropo import apply_tropo, crop_tropo
 from shapely.geometry import shape
 from tqdm import tqdm
 from utils import (
+    combine_tropo_corrections,
     extract_frame_id_from_filename,
     extract_sensing_times_from_database,
     extract_sensing_times_from_file,
@@ -356,6 +357,10 @@ def process_tropo_from_file(
         _reproject_files_parallel(
             tropo_files, _reproject_to_disp_utm, (disp_file,), num_workers
         )
+        with rxr.open_rasterio(disp_file) as _disp:
+            epsg = _disp.rio.crs.to_epsg()
+        corrections_dir = output_dir / f"tropo_corrections_{epsg}"
+        combine_tropo_corrections(corrections_dir, sensing_times[0], sensing_times[1])
 
 
 def process_tropo_from_stack(

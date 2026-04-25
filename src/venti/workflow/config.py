@@ -466,7 +466,9 @@ class CalibrationInputGroup(BaseModel):
             return Path(v)
         return v
 
-    @field_validator("custom_mask", "frame_bounds", "tropo_files", "event_mask_dir", mode="before")
+    @field_validator(
+        "custom_mask", "frame_bounds", "tropo_files", "event_mask_dir", mode="before"
+    )
     @classmethod
     def convert_optional_to_path(cls, v):
         """Convert optional string paths to Path objects."""
@@ -812,7 +814,7 @@ class RunConfig(BaseModel):
         "extra": "forbid",
     }
 
-    def model_post_init(self, __context: Any) -> None:
+    def model_post_init(self, __context: Any, /) -> None:
         """Validate that the correct input group is provided for the workflow type."""
         super().model_post_init(__context)
         workflow_name = self.primary_executable.workflow_name

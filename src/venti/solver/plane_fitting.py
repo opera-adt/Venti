@@ -41,15 +41,21 @@ def _calc_plane_values(
         return x * coef[0] + y * coef[1] + x * y * coef[2] + coef[3]
     if poly_order == 2:
         return (
-            x**2 * coef[0] + y**2 * coef[1]
-            + x * y * coef[2] + x * coef[3]
-            + y * coef[4] + coef[5]
+            x**2 * coef[0]
+            + y**2 * coef[1]
+            + x * y * coef[2]
+            + x * coef[3]
+            + y * coef[4]
+            + coef[5]
         )
     if poly_order == 3:
         return (
-            x**3 * coef[0] + y**3 * coef[1]
-            + x**2 * coef[2] + y**2 * coef[3]
-            + x * y * coef[4] + x * coef[5]
+            x**3 * coef[0]
+            + y**3 * coef[1]
+            + x**2 * coef[2]
+            + y**2 * coef[3]
+            + x * y * coef[4]
+            + x * coef[5]
             + y * coef[6]
         )
     msg = f"Unsupported poly_order={poly_order}"
@@ -59,7 +65,7 @@ def _calc_plane_values(
 def _calc_plane_uncertainty(
     x: np.ndarray,
     y: np.ndarray,
-    Qxx: np.ndarray,
+    covariance: np.ndarray,
     poly_order: float = 1.0,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Propagate coefficient covariance to surface uncertainty.
@@ -70,7 +76,7 @@ def _calc_plane_uncertainty(
         X coordinates.
     y : np.ndarray
         Y coordinates.
-    Qxx : np.ndarray
+    covariance : np.ndarray
         Coefficient covariance matrix from :func:`_weighted_lscov`.
     poly_order : float, optional
         Polynomial order, by default ``1.0``.
@@ -85,28 +91,33 @@ def _calc_plane_uncertainty(
     """
     e = np.ones(x.shape)
     if poly_order == 0:
-        plane_var = np.ones(x.shape) * Qxx[0, 0]
+        plane_var = np.ones(x.shape) * covariance[0, 0]
     elif poly_order == 1:
-        x_var, y_var, z_var = np.diag(Qxx)
-        cxy, cxz, cyz = Qxx[0, 1], Qxx[0, 2], Qxx[1, 2]
+        x_var, y_var, z_var = np.diag(covariance)
+        cxy, cxz, cyz = covariance[0, 1], covariance[0, 2], covariance[1, 2]
         plane_var = (
-            x**2 * x_var + y**2 * y_var + e**2 * z_var
+            x**2 * x_var
+            + y**2 * y_var
+            + e**2 * z_var
             + 2 * x * (y * cxy + e * cxz)
             + 2 * y * (e * cyz)
         )
     elif poly_order == 1.5:
-        x_var, y_var, xy_var, z_var = np.diag(Qxx)
-        cxy, cxxy, cxz = Qxx[0, 1], Qxx[0, 2], Qxx[0, 3]
-        cyxy, cyz, cxyz = Qxx[1, 2], Qxx[1, 3], Qxx[2, 3]
+        x_var, y_var, xy_var, z_var = np.diag(covariance)
+        cxy, cxxy, cxz = covariance[0, 1], covariance[0, 2], covariance[0, 3]
+        cyxy, cyz, cxyz = covariance[1, 2], covariance[1, 3], covariance[2, 3]
         plane_var = (
-            x**2 * x_var + y**2 * y_var + (x * y)**2 * xy_var + e**2 * z_var
+            x**2 * x_var
+            + y**2 * y_var
+            + (x * y) ** 2 * xy_var
+            + e**2 * z_var
             + 2 * x * (y * cxy + x * y * cxxy + e * cxz)
             + 2 * y * (x * y * cyxy + e * cyz)
             + 2 * x * y * (e * cxyz)
         )
     else:
         # Higher orders: diagonal-only approximation
-        diag = np.diag(Qxx)
+        diag = np.diag(covariance)
         A = _design_matrix_poly(x.ravel(), y.ravel(), poly_order=poly_order)
         plane_var = (A**2 @ diag).reshape(x.shape)
 
@@ -151,6 +162,7 @@ def _fit_plane(
     """
     if smooth:
         from ..filtering.gaussian import apply_gaussian
+
         data = apply_gaussian(data, smooth_sigma)
 
     data_sub = data[::decimate, ::decimate]
@@ -162,7 +174,9 @@ def _fit_plane(
     if valid.sum() < n_coeff:
         return np.zeros_like(data), np.zeros_like(data)
 
-    A = _design_matrix_poly(lons_sub.ravel()[valid], lats_sub.ravel()[valid], poly_order=order)
+    A = _design_matrix_poly(
+        lons_sub.ravel()[valid], lats_sub.ravel()[valid], poly_order=order
+    )
     b = data_sub.ravel()[valid]
     w = np.ones_like(b)
 

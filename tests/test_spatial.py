@@ -236,10 +236,14 @@ class TestFitWindowedPlane:
 
         insar, gnss = self._flat_scene()
         surface, std = fit_windowed_plane(
-            insar, gnss,
-            win_xsize=40, win_ysize=30,
-            win_overlap_x=5, win_overlap_y=5,
-            win_extend_x=40, win_extend_y=30,
+            insar,
+            gnss,
+            win_xsize=40,
+            win_ysize=30,
+            win_overlap_x=5,
+            win_overlap_y=5,
+            win_extend_x=40,
+            win_extend_y=30,
             n_jobs=1,
         )
         assert surface.shape == (self.NY, self.NX)
@@ -250,11 +254,16 @@ class TestFitWindowedPlane:
 
         insar, gnss = self._flat_scene(value=0.0)
         surface, _ = fit_windowed_plane(
-            insar, gnss,
-            win_xsize=40, win_ysize=30,
-            win_overlap_x=5, win_overlap_y=5,
-            win_extend_x=40, win_extend_y=30,
-            poly_order=1, n_jobs=1,
+            insar,
+            gnss,
+            win_xsize=40,
+            win_ysize=30,
+            win_overlap_x=5,
+            win_overlap_y=5,
+            win_extend_x=40,
+            win_extend_y=30,
+            poly_order=1,
+            n_jobs=1,
         )
         assert np.nanmax(np.abs(surface)) < 1e-4
 
@@ -263,11 +272,16 @@ class TestFitWindowedPlane:
 
         insar, gnss = self._linear_residual_scene()
         surface, _ = fit_windowed_plane(
-            insar, gnss,
-            win_xsize=40, win_ysize=30,
-            win_overlap_x=5, win_overlap_y=5,
-            win_extend_x=40, win_extend_y=30,
-            poly_order=1, n_jobs=1,
+            insar,
+            gnss,
+            win_xsize=40,
+            win_ysize=30,
+            win_overlap_x=5,
+            win_overlap_y=5,
+            win_extend_x=40,
+            win_extend_y=30,
+            poly_order=1,
+            n_jobs=1,
         )
         assert np.nanmax(np.abs(surface)) > 1e-4
 
@@ -277,10 +291,14 @@ class TestFitWindowedPlane:
         insar, gnss = self._flat_scene()
         insar[10:20, 10:20] = np.nan
         surface, _ = fit_windowed_plane(
-            insar, gnss,
-            win_xsize=40, win_ysize=30,
-            win_overlap_x=5, win_overlap_y=5,
-            win_extend_x=40, win_extend_y=30,
+            insar,
+            gnss,
+            win_xsize=40,
+            win_ysize=30,
+            win_overlap_x=5,
+            win_overlap_y=5,
+            win_extend_x=40,
+            win_extend_y=30,
             n_jobs=1,
         )
         assert surface.shape == (self.NY, self.NX)
@@ -291,11 +309,16 @@ class TestFitWindowedPlane:
         insar, gnss = self._flat_scene()
         std_field = np.ones_like(insar) * 0.001
         surface, _ = fit_windowed_plane(
-            insar, gnss,
-            win_xsize=40, win_ysize=30,
-            win_overlap_x=5, win_overlap_y=5,
-            win_extend_x=40, win_extend_y=30,
-            gnss_los_std=std_field, n_jobs=1,
+            insar,
+            gnss,
+            win_xsize=40,
+            win_ysize=30,
+            win_overlap_x=5,
+            win_overlap_y=5,
+            win_extend_x=40,
+            win_extend_y=30,
+            gnss_los_std=std_field,
+            n_jobs=1,
         )
         assert surface.shape == (self.NY, self.NX)
 
@@ -315,8 +338,11 @@ class TestSpatialProcessor:
         insar = np.zeros((self.NY, self.NX), dtype=np.float32)
         gnss = np.zeros((self.NY, self.NX), dtype=np.float32)
         result = processor.fit_windowed_surface(
-            insar, gnss, 
-            window_size_x=40, window_size_y=30, n_jobs=1,
+            insar,
+            gnss,
+            window_size_x=40,
+            window_size_y=30,
+            n_jobs=1,
         )
         assert isinstance(result, np.ndarray)
         assert result.shape == (self.NY, self.NX)
@@ -328,8 +354,11 @@ class TestSpatialProcessor:
         insar = np.zeros((self.NY, self.NX), dtype=np.float32)
         gnss = np.zeros((self.NY, self.NX), dtype=np.float32)
         result = processor.fit_windowed_surface(
-            insar, gnss, 
-            window_size_x=40, window_size_y=30, n_jobs=1,
+            insar,
+            gnss,
+            window_size_x=40,
+            window_size_y=30,
+            n_jobs=1,
         )
         assert result.shape == (self.NY, self.NX)
 
@@ -341,9 +370,12 @@ class TestSpatialProcessor:
         gnss = np.zeros((self.NY, self.NX), dtype=np.float32)
         for order in [0, 1, 1.5, 2]:
             result = processor.fit_windowed_surface(
-                insar, gnss, 
-                window_size_x=40, window_size_y=30,
-                poly_order=order, n_jobs=1,
+                insar,
+                gnss,
+                window_size_x=40,
+                window_size_y=30,
+                poly_order=order,
+                n_jobs=1,
             )
             assert result.shape == (self.NY, self.NX)
 
@@ -354,9 +386,13 @@ class TestSpatialProcessor:
         insar = np.zeros((self.NY, self.NX), dtype=np.float32)
         gnss = np.zeros((self.NY, self.NX), dtype=np.float32)
         result = processor.fit_windowed_surface(
-            insar, gnss,
-            window_size_x=40, window_size_y=30,
-            window_extend_x=20, window_extend_y=15, n_jobs=1,
+            insar,
+            gnss,
+            window_size_x=40,
+            window_size_y=30,
+            window_extend_x=20,
+            window_extend_y=15,
+            n_jobs=1,
         )
         assert result.shape == (self.NY, self.NX)
 
@@ -378,11 +414,16 @@ class TestFitWindowedPlaneSmoothing:
 
         insar, gnss = self._flat_scene()
         surface, _ = fit_windowed_plane(
-            insar, gnss,
-            win_xsize=40, win_ysize=30,
-            win_overlap_x=5, win_overlap_y=5,
-            win_extend_x=40, win_extend_y=30,
-            poly_order=1, n_jobs=1,
+            insar,
+            gnss,
+            win_xsize=40,
+            win_ysize=30,
+            win_overlap_x=5,
+            win_overlap_y=5,
+            win_extend_x=40,
+            win_extend_y=30,
+            poly_order=1,
+            n_jobs=1,
             smoothing_sigma=sigma,
             smoothing_method=method,
             **kwargs,
@@ -402,7 +443,9 @@ class TestFitWindowedPlaneSmoothing:
         assert surface.shape == (self.NY, self.NX)
 
     def test_savitzky_golay(self):
-        surface = self._run("savitzky_golay", sigma=None, sg_window_length=11, sg_polyorder=2)
+        surface = self._run(
+            "savitzky_golay", sigma=None, sg_window_length=11, sg_polyorder=2
+        )
         assert surface.shape == (self.NY, self.NX)
 
     def test_no_smoothing_when_sigma_none_and_not_sg(self):

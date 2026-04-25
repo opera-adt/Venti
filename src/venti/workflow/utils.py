@@ -13,8 +13,6 @@ from pathlib import Path
 
 import numpy as np
 
-from ..spatial.resample import downsample_array, upsample_array  # re-exported for backward compat
-
 logger = logging.getLogger(__name__)
 
 
@@ -130,10 +128,12 @@ def match_correction_to_displacement(
 
     # Match by dates
     for dates, disp_file in disp_dict.items():
-        # Try matching with (None, secondary_date)
-        corr_date_key = (None, dates[1])
-        if corr_date_key in corr_dict:
-            matches.append((corr_dict[corr_date_key], disp_file))
+        # Prefer a combined differential file keyed by (ref_date, sec_date)
+        if dates in corr_dict:
+            matches.append((corr_dict[dates], disp_file))
+        # Fall back to a single-epoch file keyed by (None, secondary_date)
+        elif (None, dates[1]) in corr_dict:
+            matches.append((corr_dict[(None, dates[1])], disp_file))
         else:
             logger.warning(f"No correction file matched for {dates}")
 

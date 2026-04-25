@@ -16,7 +16,6 @@ import xarray as xr
 from ..spatial.interpolation import (
     InterpolationMethod,
     RbfFunction,
-    _regular_grid_interpolator_from_ds,
     _sample_on_points,
     interpolate_griddata,
     interpolate_rbf,
@@ -97,10 +96,14 @@ def project_to_los(
     zv = los_at_stations[valid]
 
     if zv.size == 0:
-        msg = "No valid GNSS LOS samples after masking — check CRS, coverage, and masks."
+        msg = (
+            "No valid GNSS LOS samples after masking — check CRS, coverage, and masks."
+        )
         raise ValueError(msg)
 
-    logger.info("Interpolating LOS from %d GNSS stations using method='%s'", zv.size, method)
+    logger.info(
+        "Interpolating LOS from %d GNSS stations using method='%s'", zv.size, method
+    )
 
     if method == "rbf":
         return interpolate_rbf(netcdf_file, gx, gy, zv, function=rbf_function)

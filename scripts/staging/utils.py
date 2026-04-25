@@ -12,6 +12,7 @@ from pathlib import Path
 
 import geopandas as gpd
 import requests  # type: ignore[import-untyped]
+import rioxarray as rxr
 from shapely.geometry import shape
 
 logger = logging.getLogger(__name__)
@@ -166,6 +167,85 @@ def load_burst_database(url: str = BURST_DB_URL) -> gpd.GeoDataFrame:
 # ==============================================================================
 # File parsing utilities
 # ==============================================================================
+
+
+def combine_tropo_corrections(
+    corrections_dir: Path,
+    ref_time: datetime,
+    sec_time: datetime,
+) -> Path:
+    """Combine per-epoch corrections into a single differential correction file.
+
+    Subtracts the reference-date tropospheric delay from the secondary-date
+    delay to form the net correction matching the sign convention of a DISP-S1
+    displacement field (``secondary - reference``).
+
+    Parameters
+    ----------
+    corrections_dir : Path
+        Directory containing the per-epoch correction GeoTIFFs reprojected to
+        the DISP UTM grid (e.g. ``tropo_corrections_32611/``).
+    ref_time : datetime
+        Reference epoch sensing time.
+    sec_time : datetime
+        Secondary epoch sensing time.
+
+    Returns
+    -------
+    Path
+        Path to the combined differential correction GeoTIFF, named
+        ``tropo_correction_{ref_stem}_{sec_stem}_{epsg}.tif``.
+
+    Raises
+    ------
+    FileNotFoundError
+        If a correction file for either epoch cannot be found in
+        `corrections_dir`.
+
+    Examples
+    --------
+    >>> from datetime import datetime
+    >>> combine_tropo_corrections(
+    ...     Path("tropo/tropo_corrections_32611"),
+    ...     datetime(2016, 7, 24, 1, 58, 9),
+    ...     datetime(2016, 8, 5, 1, 58, 9),
+    ... )  # doctest: +SKIP
+
+    """
+    ref_stem = ref_time.strftime("%Y%m%dT%H%M%S")
+    sec_stem = sec_time.strftime("%Y%m%dT%H%M%S")
+
+    ref_files = list(corrections_dir.glob(f"*{ref_stem}*.tif"))
+    sec_files = list(corrections_dir.glob(f"*{sec_stem}*.tif"))
+
+    if not ref_files:
+        msg = (
+            f"No correction file found for reference epoch {ref_stem} "
+            f"in {corrections_dir}"
+        )
+        raise FileNotFoundError(msg)
+    if not sec_files:
+        msg = (
+            f"No correction file found for secondary epoch {sec_stem} "
+            f"in {corrections_dir}"
+        )
+        raise FileNotFoundError(msg)
+
+    # EPSG suffix is the last underscore-delimited token in the directory name
+    # e.g. "tropo_corrections_32611" -> "32611"
+    epsg_suffix = corrections_dir.name.split("_")[-1]
+    out_name = f"tropo_correction_{ref_stem}_{sec_stem}_{epsg_suffix}.tif"
+    out_path = corrections_dir / out_name
+
+    with (
+        rxr.open_rasterio(ref_files[0]) as ref_da,
+        rxr.open_rasterio(sec_files[0]) as sec_da,
+    ):
+        differential = sec_da - ref_da
+        differential.rio.to_raster(out_path)
+
+    logger.info(f"Differential tropo correction written to {out_path}")
+    return out_path
 
 
 def extract_sensing_times_from_file(disp_file: Path) -> list[datetime]:

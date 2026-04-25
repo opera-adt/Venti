@@ -366,3 +366,211 @@ def stage_frame(
         logger.info("      Velocities: %s", vel_path)
 
     logger.info("Staging complete. All outputs in %s", output_dir.resolve())
+
+
+def stage_window(
+    frame_id: int,
+    start: str,
+    end: str,
+    output_dir: Path,
+    num_workers: int = 4,
+    dem_buffer: float = 10_000.0,
+    skip_tropo: bool = False,
+    skip_gnss: bool = False,
+    gnss_reference_frame: str = "IGS20",
+    gnss_padding: float = 0.0,
+    gnss_start_year: float = 2014.0,
+) -> list[Path]:
+    """Stage all ancillary data for multiple OPERA DISP-S1 products in a time window.
+
+    Downloads every DISP-S1 product whose secondary date falls within
+    ``[start, end]`` and generates all ancillary data required for downstream
+    calibration.  Frame-level assets (DEM, LOS geometry, GNSS velocities) are
+    produced once and shared across all products in the window.  Tropospheric
+    corrections are downloaded in a single batched pass across all unique epoch
+    sensing times and then combined into per-product differential correction
+    files (secondary - reference).
+
+    Parameters
+    ----------
+    frame_id : int
+        OPERA frame identifier.
+    start : str
+        Start of the secondary-date window (YYYY-MM-DD or YYYYMMDD).
+    end : str
+        End of the secondary-date window (YYYY-MM-DD or YYYYMMDD).
+    output_dir : Path
+        Root directory for all staged outputs.  The directory layout mirrors
+        that of :func:`stage_frame`:
+
+        .. code-block:: text
+
+            <output_dir>/
+            ├── disp_s1/   # All downloaded DISP-S1 NetCDF files
+            ├── dem/        # Shared GLO-30 DEM
+            ├── los/        # Shared LOS ENU and incidence angle rasters
+            ├── tropo/      # Per-product differential tropo corrections
+            └── gnss/       # Shared UNR GNSS velocities
+
+    num_workers : int, optional
+        Number of parallel workers for downloads and processing. Default is 4.
+    dem_buffer : float, optional
+        Buffer in metres around the frame extent for DEM generation.
+        Default is 10,000 m (10 km).
+    skip_tropo : bool, optional
+        Skip tropospheric correction processing. Default is False.
+    skip_gnss : bool, optional
+        Skip UNR GNSS download and velocity estimation. Default is False.
+    gnss_reference_frame : str, optional
+        GNSS reference frame for UNR data (``'IGS20'`` or ``'IGS14'``).
+        Default is ``'IGS20'``.
+    gnss_padding : float, optional
+        Extra padding in metres beyond frame bounds when searching for GNSS
+        stations. Default is ``0.0``.
+    gnss_start_year : float, optional
+        Exclude GNSS observations before this decimal year when estimating
+        velocities. Default is ``2014.0``.
+
+    Returns
+    -------
+    list[Path]
+        Paths of the downloaded DISP-S1 NetCDF files, sorted by secondary date.
+
+    Raises
+    ------
+    FileNotFoundError
+        If no DISP-S1 files are found after download.
+    ValueError
+        If the frame ID is invalid or the date range yields no products.
+
+    Examples
+    --------
+    Stage all products for frame 8887 between 2016-06-01 and 2016-12-31::
+
+        stage_window(
+            frame_id=8887,
+            start="2016-06-01",
+            end="2016-12-31",
+            output_dir=Path("./data"),
+        )
+
+    Skip tropospheric corrections::
+
+        stage_window(
+            frame_id=8887,
+            start="2016-06-01",
+            end="2016-12-31",
+            output_dir=Path("./data"),
+            skip_tropo=True,
+        )
+
+    """
+    sys.path.insert(0, str(_STAGING_DIR))
+    from dem_cli import generate_frame_dem
+    from disp_cli import download_frame_products
+    from los_cli import generate_incidence_angle_raster, generate_los_enu_raster
+    from tropo_cli import process_tropo_from_stack
+    from utils import (
+        combine_tropo_corrections,
+        extract_sensing_times_from_file,
+        parse_date,
+    )
+
+    start_dt = parse_date(start)
+    end_dt = parse_date(end)
+    assert start_dt is not None
+    assert end_dt is not None
+
+    disp_dir = output_dir / "disp_s1"
+    dem_dir = output_dir / "dem"
+    los_dir = output_dir / "los"
+    tropo_dir = output_dir / "tropo"
+    gnss_dir = output_dir / "gnss"
+
+    n_steps = 5 - int(skip_tropo) - int(skip_gnss)
+    step = 0
+
+    def _step(label: str) -> str:
+        nonlocal step
+        step += 1
+        return f"[{step}/{n_steps}] {label}"
+
+    logger.info(
+        _step(
+            f"Downloading DISP-S1 products for frame {frame_id} from {start} to {end}"
+        )
+    )
+    download_frame_products(
+        frame_id=frame_id,
+        output_dir=disp_dir,
+        start=start_dt,
+        end=end_dt,
+        num_workers=num_workers,
+    )
+
+    pattern = f"OPERA_L3_DISP-S1*F{frame_id:05d}*.nc"
+    disp_files = sorted(disp_dir.glob(pattern))
+    if not disp_files:
+        msg = f"No DISP-S1 files found for frame {frame_id} in {disp_dir}"
+        raise FileNotFoundError(msg)
+    logger.info("      Found %d products", len(disp_files))
+
+    logger.info(_step(f"Generating DEM for frame {frame_id}"))
+    dem_path = generate_frame_dem(
+        frame_id=frame_id,
+        buffer=dem_buffer,
+        output_dir=dem_dir,
+        use_disp_epsg=True,
+    )
+    logger.info("      DEM: %s", dem_path)
+
+    logger.info(_step(f"Generating LOS geometry for frame {frame_id}"))
+    los_path = generate_los_enu_raster(frame_id=frame_id, output_dir=los_dir)
+    inc_path = generate_incidence_angle_raster(
+        los_enu_path=los_path, output_dir=los_dir
+    )
+    logger.info("      LOS ENU: %s", los_path)
+    logger.info("      Incidence angle: %s", inc_path)
+
+    if not skip_tropo:
+        logger.info(
+            _step(f"Processing tropospheric corrections for {len(disp_files)} products")
+        )
+        process_tropo_from_stack(
+            disp_dir=disp_dir,
+            dem_path=dem_path,
+            incidence_angle_path=inc_path,
+            output_dir=tropo_dir,
+            num_workers=num_workers,
+            frame_id=frame_id,
+            to_disp_epsg=True,
+        )
+        # Determine reprojected corrections directory from first file's EPSG
+        import rioxarray as rxr
+
+        with rxr.open_rasterio(disp_files[0]) as _disp:
+            epsg = _disp.rio.crs.to_epsg()
+        corrections_dir = tropo_dir / f"tropo_corrections_{epsg}"
+        for disp_file in disp_files:
+            times = extract_sensing_times_from_file(disp_file)
+            combine_tropo_corrections(corrections_dir, times[0], times[1])
+        logger.info("      Tropo corrections: %s", tropo_dir)
+
+    if not skip_gnss:
+        logger.info(_step(f"Downloading UNR GNSS data for frame {frame_id}"))
+        vel_path = download_gnss_data(
+            frame_id=frame_id,
+            output_dir=gnss_dir,
+            reference_frame=gnss_reference_frame,
+            padding=gnss_padding,
+            num_workers=num_workers,
+            start_year=gnss_start_year,
+        )
+        logger.info("      Velocities: %s", vel_path)
+
+    logger.info(
+        "Staging complete. %d products staged in %s",
+        len(disp_files),
+        output_dir.resolve(),
+    )
+    return disp_files

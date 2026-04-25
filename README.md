@@ -67,7 +67,11 @@ For a given OPERA frame ID and secondary date, staging prepares:
 DEM and LOS outputs are idempotent — re-running staging for a new date on the same
 frame reuses existing files.
 
-### CLI
+### Single product
+
+Stage one DISP-S1 product by its secondary date.
+
+**CLI:**
 
 ```bash
 cd scripts/staging
@@ -87,8 +91,6 @@ python stage_frame_cli.py --frame-id 8887 --date 2016-06-15 \
 python stage_frame_cli.py --help
 ```
 
-All CLI arguments:
-
 | Argument | Default | Description |
 |----------|---------|-------------|
 | `--frame-id` | required | OPERA frame identifier |
@@ -102,13 +104,12 @@ All CLI arguments:
 | `--gnss-padding` | `0.0` | Extra meters beyond frame bounds for station search |
 | `--gnss-start-year` | `2014.0` | Earliest year used for velocity estimation |
 
-### Python API
+**Python API:**
 
 ```python
 from pathlib import Path
 from venti.workflow import run_data_staging
 
-# Stage all data for a single interferogram
 run_data_staging(
     frame_id=8887,
     date="2016-06-15",
@@ -116,16 +117,60 @@ run_data_staging(
 )
 ```
 
-Skip individual steps as needed:
+### Time window (multiple products)
+
+Stage all DISP-S1 products for a frame whose secondary date falls within a given
+range.  DEM, LOS geometry, and GNSS velocities are produced once and shared
+across all products.  Tropospheric corrections are batched over all unique epoch
+sensing times and combined into per-product differential files.
+
+**CLI:**
+
+```bash
+cd scripts/staging
+
+# Stage all products for a frame in a given year
+python stage_window_cli.py --frame-id 8887 --start 2016-01-01 --end 2016-12-31
+
+# Custom output directory
+python stage_window_cli.py --frame-id 8887 --start 2016-01-01 --end 2016-12-31 \
+    --output-dir /data/opera/frame_8887
+
+# Skip optional steps
+python stage_window_cli.py --frame-id 8887 --start 2016-01-01 --end 2016-12-31 \
+    --skip-tropo --skip-gnss
+
+# Full options
+python stage_window_cli.py --help
+```
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `--frame-id` | required | OPERA frame identifier |
+| `--start` | required | Window start — secondary date (YYYY-MM-DD or YYYYMMDD) |
+| `--end` | required | Window end — secondary date (YYYY-MM-DD or YYYYMMDD) |
+| `--output-dir` | `./staging` | Root directory for all outputs |
+| `--num-workers` | `4` | Parallel workers for downloads |
+| `--dem-buffer` | `10000.0` | Buffer in meters around frame for DEM |
+| `--skip-tropo` | `False` | Skip tropospheric corrections |
+| `--skip-gnss` | `False` | Skip GNSS download and velocity estimation |
+| `--gnss-reference-frame` | `IGS20` | GNSS reference frame (`IGS20` or `IGS14`) |
+| `--gnss-padding` | `0.0` | Extra meters beyond frame bounds for station search |
+| `--gnss-start-year` | `2014.0` | Earliest year used for velocity estimation |
+
+**Python API:**
 
 ```python
-run_data_staging(
+from pathlib import Path
+from venti.workflow import run_data_staging_window
+
+disp_files = run_data_staging_window(
     frame_id=8887,
-    date="2016-06-15",
+    start="2016-01-01",
+    end="2016-12-31",
     output_dir=Path("./data"),
-    skip_tropo=True,
-    skip_gnss=True,
 )
+print(f"Staged {len(disp_files)} products")
 ```
 
 ### Preview available products before staging
@@ -142,7 +187,8 @@ python disp_cli.py preview --frame-id 8887 --start 2016-01-01 --end 2017-01-01 -
 ```
 <output_dir>/
 ├── disp_s1/
-│   └── OPERA_L3_DISP-S1_IW_F08887_VV_*.nc
+│   ├── OPERA_L3_DISP-S1_IW_F08887_VV_20160101T*_20160115T*_*.nc
+│   └── ...                              # one file per secondary date (window staging)
 ├── dem/
 │   ├── dem_frame_8887.tif               # WGS84
 │   └── dem_frame_8887_epsg32610.tif     # native UTM
@@ -155,8 +201,11 @@ python disp_cli.py preview --frame-id 8887 --start 2016-01-01 --end 2017-01-01 -
 ├── tropo/
 │   ├── tropo_urls.txt
 │   ├── cropped_tropo/
-│   ├── tropo_corrections/
-│   └── tropo_corrections_{epsg}/
+│   ├── tropo_corrections/               # per-epoch absolute delays
+│   └── tropo_corrections_{epsg}/        # reprojected; includes differential
+│       ├── tropo_correction_{ref}_{epsg}.tif
+│       ├── tropo_correction_{sec}_{epsg}.tif
+│       └── tropo_correction_{ref}_{sec}_{epsg}.tif  # combined (sec - ref)
 └── gnss/
     ├── grid_latlon_lookup.txt
     ├── stations/

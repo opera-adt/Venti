@@ -55,7 +55,7 @@ def gaussian_fft(
     valid: np.ndarray,
     sigma: float,
 ) -> np.ndarray:
-    """Apply a frequency-domain Gaussian low-pass filter to a calibration surface.
+    r"""Apply a frequency-domain Gaussian low-pass filter to a calibration surface.
 
     Applies a Gaussian low-pass kernel in the Fourier domain.  Equivalent to
     `gaussian_spatial` but avoids truncation of the Gaussian kernel, so it is
@@ -87,7 +87,7 @@ def gaussian_fft(
     where :math:`f` is in cycles per pixel.
 
     """
-    from scipy.fft import fft2, ifft2, fftfreq
+    from scipy.fft import fft2, fftfreq, ifft2
 
     ny, nx = surface.shape
     fy = fftfreq(ny)[:, np.newaxis]
@@ -110,7 +110,7 @@ def hanning_fft(
     valid: np.ndarray,
     sigma: float,
 ) -> np.ndarray:
-    """Apply a frequency-domain Hanning low-pass filter to a calibration surface.
+    r"""Apply a frequency-domain Hanning low-pass filter to a calibration surface.
 
     Applies a raised-cosine (Hanning) low-pass window in the Fourier domain.
     The Hanning taper has a sharper roll-off than a Gaussian and produces no
@@ -147,7 +147,7 @@ def hanning_fft(
     where :math:`f_c = 1 / (2\\sigma)`.
 
     """
-    from scipy.fft import fft2, ifft2, fftfreq
+    from scipy.fft import fft2, fftfreq, ifft2
 
     ny, nx = surface.shape
     fy = fftfreq(ny)[:, np.newaxis]

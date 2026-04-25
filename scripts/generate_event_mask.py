@@ -37,7 +37,6 @@ The output filename is derived automatically from both inputs:
     <product_stem>_<geojson_stem>_mask.tif
 
 Examples:
-
     events.geojson          -> ..._events_mask.tif
     continuous_defo.geojson -> ..._continuous_defo_mask.tif
 
@@ -48,10 +47,12 @@ Usage
 ::
 
     # events mask — output auto-named from GeoJSON stem
-    python generate_event_mask.py events.geojson OPERA_L3_DISP-S1_IW_F36540_VV_20160724T015809Z_20160805T015809Z_v1.0.nc
+    python generate_event_mask.py events.geojson \
+        OPERA_L3_DISP-S1_IW_F36540_VV_20160724T015809Z_20160805T015809Z_v1.0.nc
 
     # continuous deformation mask
-    python generate_event_mask.py continuous_defo.geojson OPERA_L3_DISP-S1_IW_F36540_VV_20160724T015809Z_20160805T015809Z_v1.0.nc
+    python generate_event_mask.py continuous_defo.geojson \
+        OPERA_L3_DISP-S1_IW_F36540_VV_20160724T015809Z_20160805T015809Z_v1.0.nc
 
     # explicit output path
     python generate_event_mask.py events.geojson product.nc --output masks/my_mask.tif
@@ -65,9 +66,9 @@ import logging
 import re
 from datetime import date, datetime
 from pathlib import Path
+from typing import Any
 
 import numpy as np
-from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -178,7 +179,7 @@ def _read_product_georef(product_path: Path) -> tuple[Any, Any, int, int]:
 
 
 def default_output_path(product_path: Path, geojson_path: Path) -> Path:
-    """Return the default output mask path derived from the product and GeoJSON filenames.
+    """Return the default output mask path derived from the product and GeoJSON paths.
 
     The output is placed alongside the product and named
     ``<product_stem>_<geojson_stem>_mask.tif``, so the GeoJSON filename
@@ -244,14 +245,16 @@ def generate_event_mask(
             geojson_path=Path("events.geojson"),
         )
         print(out)
-        # OPERA_L3_DISP-S1_IW_F36540_VV_20160724T015809Z_20160805T015809Z_v1.0_events_mask.tif
+        # OPERA_L3_DISP-S1_IW_F36540_VV_20160724T015809Z_20160805T015809Z
+        # _v1.0_events_mask.tif
 
         out = generate_event_mask(
             product_path=Path("OPERA_L3_DISP-S1_IW_F36540_VV_20160724T015809Z_20160805T015809Z_v1.0.nc"),
             geojson_path=Path("continuous_defo.geojson"),
         )
         print(out)
-        # OPERA_L3_DISP-S1_IW_F36540_VV_20160724T015809Z_20160805T015809Z_v1.0_continuous_defo_mask.tif
+        # OPERA_L3_DISP-S1_IW_F36540_VV_20160724T015809Z_20160805T015809Z
+        # _v1.0_continuous_defo_mask.tif
 
     """
     import geopandas as gpd
@@ -341,26 +344,28 @@ def main() -> None:
     """Parse arguments and run the event mask generator."""
     parser = argparse.ArgumentParser(
         description=(
-            "Generate an event mask GeoTIFF from a GeoJSON and an OPERA DISP-S1 product.\n\n"
-            "GeoJSON fields required: id, frame_id, event_date, geometry.\n"
-            "Any GeoJSON CRS is accepted; output is always in the product CRS.\n"
-            "Values: 1 = valid pixel, 0 = event region."
+            "Generate an event mask GeoTIFF from a GeoJSON and an OPERA DISP-S1"
+            " product.\n\nGeoJSON fields required: id, frame_id, event_date,"
+            " geometry.\nAny GeoJSON CRS is accepted; output is always in the product"
+            " CRS.\nValues: 1 = valid pixel, 0 = event region."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
-            "Output naming (automatic):\n"
-            "  events.geojson          -> <product_stem>_events_mask.tif\n"
-            "  continuous_defo.geojson -> <product_stem>_continuous_defo_mask.tif\n\n"
-            "Examples:\n"
-            "  python generate_event_mask.py events.geojson product.nc\n"
-            "  python generate_event_mask.py continuous_defo.geojson product.nc\n"
-            "  python generate_event_mask.py events.geojson product.nc -o masks/custom.tif\n"
+            "Output naming (automatic):\n  events.geojson          ->"
+            " <product_stem>_events_mask.tif\n  continuous_defo.geojson ->"
+            " <product_stem>_continuous_defo_mask.tif\n\nExamples:\n  python"
+            " generate_event_mask.py events.geojson product.nc\n  python"
+            " generate_event_mask.py continuous_defo.geojson product.nc\n  python"
+            " generate_event_mask.py events.geojson product.nc -o masks/custom.tif\n"
         ),
     )
     parser.add_argument(
         "geojson",
         type=Path,
-        help="Path to GeoJSON file with event or deformation polygons (any CRS; EPSG:4326 assumed if undeclared).",
+        help=(
+            "Path to GeoJSON file with event or deformation polygons (any CRS;"
+            " EPSG:4326 assumed if undeclared)."
+        ),
     )
     parser.add_argument(
         "product",

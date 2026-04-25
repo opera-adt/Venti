@@ -12,6 +12,7 @@ import numpy as np
 import pytest
 import yaml  # type: ignore[import-untyped]
 
+from venti.spatial.resample import downsample_array, upsample_array
 from venti.workflow.config import (
     AlgorithmParameters,
     CalibrationInputGroup,
@@ -30,12 +31,10 @@ from venti.workflow.config import (
 )
 from venti.workflow.utils import (
     datetime_to_decimal_year,
-    downsample_array,
     ensure_directory,
     extract_dates_from_filename,
     match_correction_to_displacement,
     parse_window_size_meters,
-    upsample_array,
 )
 
 
@@ -136,7 +135,9 @@ class TestCalibrationOptions:
         assert opts.calibration_surface_smoothing_sigma == 0
 
     def test_smoothing_sigma_negative_rejected(self):
-        with pytest.raises(ValueError, match="greater than or equal to|Input should be"):
+        with pytest.raises(
+            ValueError, match="greater than or equal to|Input should be"
+        ):
             CalibrationOptions(calibration_surface_smoothing_sigma=-1.0)
 
     def test_event_mask_buffer_default_is_zero(self):
@@ -148,7 +149,9 @@ class TestCalibrationOptions:
         assert opts.event_mask_buffer_pixels == 15
 
     def test_event_mask_buffer_negative_rejected(self):
-        with pytest.raises(ValueError, match="greater than or equal to|Input should be"):
+        with pytest.raises(
+            ValueError, match="greater than or equal to|Input should be"
+        ):
             CalibrationOptions(event_mask_buffer_pixels=-1)
 
 

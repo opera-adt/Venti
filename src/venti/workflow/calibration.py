@@ -403,8 +403,9 @@ class CalibrationWorkflow:
             Output file path if successful
 
         """
+        from ..spatial.resample import downsample_array, upsample_array
         from ..unwrap import correct_region_offset
-        from .utils import downsample_array, get_file_dates, upsample_array
+        from .utils import get_file_dates
 
         assert self.io_reader is not None, "io_reader not initialized"
         assert self.io_writer is not None, "io_writer not initialized"
