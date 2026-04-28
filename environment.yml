@@ -23,7 +23,10 @@ dependencies:
   - shapely
   - numba
   - netcdf4
+  - gdal
+  - libgdal-netcdf
   - ipykernel
   - matplotlib
   - pip:
     - opera-utils
+    - dem-stitcher

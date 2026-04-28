@@ -595,7 +595,7 @@ def correct_region_offset(
 
     n_valid = np.sum(~np.isnan(disp_masked))
     n_total = disp_masked.size
-    logger.info(f"Valid pixels: {n_valid}/{n_total} ({100*n_valid/n_total:.1f}%)")
+    logger.info(f"Valid pixels: {n_valid}/{n_total} ({100 * n_valid / n_total:.1f}%)")
 
     # Run correction
     corrector = UnwrapCorrector(min_region_area=min_region_area, wavelength=wavelength)

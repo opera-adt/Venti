@@ -9,7 +9,7 @@ This module provides workflow execution functions for:
 from __future__ import annotations
 
 import logging
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Literal, cast
 
@@ -20,7 +20,7 @@ from .decomposition import DecompositionState, DecompositionWorkflow
 logger = logging.getLogger(__name__)
 
 
-class WorkflowType(str, Enum):
+class WorkflowType(StrEnum):
     """Available workflow types."""
 
     calibrate = "calibrate"

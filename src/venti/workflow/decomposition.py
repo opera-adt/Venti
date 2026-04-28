@@ -218,8 +218,8 @@ class DecompositionWorkflow:
         # Assumes purely vertical and horizontal motion
         # This is NOT the proper implementation!
 
-        e_asc, n_asc, u_asc = los_vectors_asc
-        e_desc, n_desc, u_desc = los_vectors_desc
+        _e_asc, _n_asc, _u_asc = los_vectors_asc
+        _e_desc, _n_desc, _u_desc = los_vectors_desc
 
         # TODO: Implement proper least-squares inversion
         # For now, return placeholder arrays

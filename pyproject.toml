@@ -46,6 +46,8 @@ dependencies = [
   "opera-utils",
   "numba",
   "netcdf4",
+  "gdal",
+  "dem-stitcher",
 ]
 
 # The version will be written into a version.py upon install, auto-generated
@@ -83,6 +85,7 @@ platforms = ["osx-arm64", "linux-64"]
 
 [tool.pixi.pypi-dependencies]
 venti = { path = ".", editable = true }
+dem-stitcher = "*"
 
 [tool.pixi.dependencies]
 python = ">=3.11"
@@ -107,6 +110,8 @@ shapely = "*"
 opera-utils = "*"
 numba = "*"
 netcdf4 = "*"
+gdal = "*"
+libgdal-netcdf = "*"
 
 [tool.pixi.tasks]
 check = "pre-commit run -a"
