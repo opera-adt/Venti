@@ -366,7 +366,8 @@ class CalibrationWorkflow:
         ref_point: tuple[int, int],
         window_size_x: int,
         window_size_y: int,
-        tropo_file: Path | None = None,
+        tropo_ref_file: Path | None = None,
+        tropo_sec_file: Path | None = None,
         event_mask_file: Path | None = None,
     ) -> Path | None:
         """Process a single displacement file.
@@ -389,8 +390,12 @@ class CalibrationWorkflow:
             Window width
         window_size_y : int
             Window height
-        tropo_file : Path, optional
-            Tropospheric correction file path
+        tropo_ref_file : Path, optional
+            Per-epoch tropospheric correction for the reference date.
+        tropo_sec_file : Path, optional
+            Per-epoch tropospheric correction for the secondary date.
+            The net correction applied is ``sec - ref``, reference-point
+            normalised, consistent with the DISP-S1 displacement convention.
         event_mask_file : Path, optional
             Per-epoch event mask GeoTIFF (1=valid, 0=event region).  When
             provided, the event region is filled with nearest valid neighbors
@@ -426,10 +431,11 @@ class CalibrationWorkflow:
         refy, refx = ref_point
         disp -= disp[refy, refx]
 
-        # Apply tropospheric correction if available
-        if tropo_file is not None:
-            tropo_data = self.io_reader.read_geotiff(tropo_file)
-            tropo_corr = tropo_data.data * 1000  # Convert to mm
+        # Apply tropospheric correction: form differential (sec - ref) on the fly
+        if tropo_ref_file is not None and tropo_sec_file is not None:
+            ref_tropo_data = self.io_reader.read_geotiff(tropo_ref_file)
+            sec_tropo_data = self.io_reader.read_geotiff(tropo_sec_file)
+            tropo_corr = (sec_tropo_data.data - ref_tropo_data.data) * 1000
             tropo_corr -= tropo_corr[refy, refx]
             disp -= tropo_corr
 
@@ -591,7 +597,8 @@ class CalibrationWorkflow:
         suffix = f"_calibration_surface_{grid_type}_{ref_frame}"
         if self.config.grid_settings.downsample_factor > 1:
             suffix += f"_downsample{self.config.grid_settings.downsample_factor}"
-        if tropo_file is not None:
+        _tropo_applied = tropo_ref_file is not None and tropo_sec_file is not None
+        if _tropo_applied:
             suffix += "_tropo"
         if not apply_unwrap_correction:
             suffix += "_nowrap"
@@ -605,7 +612,7 @@ class CalibrationWorkflow:
         description = (
             f"Calibration surface ({self.config.grid_settings.grid_type} GNSS model)"
         )
-        if tropo_file is not None:
+        if _tropo_applied:
             description += " with tropospheric correction"
 
         self.io_writer.write_geotiff(
@@ -658,7 +665,8 @@ class CalibrationWorkflow:
     def run_single(
         self,
         disp_file: Path,
-        tropo_file: Path | None = None,
+        tropo_ref_file: Path | None = None,
+        tropo_sec_file: Path | None = None,
     ) -> CalibrationState:
         """Run the calibration workflow on a single displacement file.
 
@@ -669,8 +677,10 @@ class CalibrationWorkflow:
         ----------
         disp_file : Path
             Path to the NetCDF displacement file to calibrate.
-        tropo_file : Path, optional
-            Path to a tropospheric correction GeoTIFF for this epoch.
+        tropo_ref_file : Path, optional
+            Per-epoch tropospheric correction GeoTIFF for the reference date.
+        tropo_sec_file : Path, optional
+            Per-epoch tropospheric correction GeoTIFF for the secondary date.
 
         Returns
         -------
@@ -687,8 +697,10 @@ class CalibrationWorkflow:
         logger.info("Starting Venti Single-File Calibration")
         logger.info("=" * 60)
         logger.info(f"Input file : {disp_file}")
-        if tropo_file is not None:
-            logger.info(f"Tropo file : {tropo_file}")
+        if tropo_ref_file is not None:
+            logger.info(f"Tropo ref  : {tropo_ref_file}")
+        if tropo_sec_file is not None:
+            logger.info(f"Tropo sec  : {tropo_sec_file}")
 
         self.setup_gnss()
         los_east, los_north, los_up, mask = self.load_los_and_mask()
@@ -714,7 +726,8 @@ class CalibrationWorkflow:
             ref_point,
             window_size_pixels,
             window_size_pixels,
-            tropo_file=tropo_file,
+            tropo_ref_file=tropo_ref_file,
+            tropo_sec_file=tropo_sec_file,
             event_mask_file=event_mask_file,
         )
 
@@ -775,9 +788,7 @@ class CalibrationWorkflow:
         from .utils import match_correction_to_displacement
 
         if self.config.input_options.tropo_files is not None:
-            tropo_files = sorted(
-                self.config.input_options.tropo_files.glob("tropo_corr*.tif")
-            )
+            tropo_files = sorted(self.config.input_options.tropo_files.glob("*.tif"))
             self.matched_files = match_correction_to_displacement(
                 tropo_files, disp_files
             )
@@ -796,7 +807,9 @@ class CalibrationWorkflow:
         )
 
         # Process each file
-        for tropo_file, disp_file in tqdm(self.matched_files, desc="Calibrating"):
+        for ref_tropo, sec_tropo, disp_file in tqdm(
+            self.matched_files, desc="Calibrating"
+        ):
             event_mask_file = self._find_event_mask_file(disp_file)
             output_file = self.process_displacement_file(
                 disp_file,
@@ -807,7 +820,8 @@ class CalibrationWorkflow:
                 ref_point,
                 window_size_pixels,
                 window_size_pixels,
-                tropo_file=tropo_file,
+                tropo_ref_file=ref_tropo,
+                tropo_sec_file=sec_tropo,
                 event_mask_file=event_mask_file,
             )
 

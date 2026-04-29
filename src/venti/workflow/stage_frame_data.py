@@ -470,11 +470,7 @@ def stage_window(
     from disp_cli import download_frame_products
     from los_cli import generate_incidence_angle_raster, generate_los_enu_raster
     from tropo_cli import process_tropo_from_stack
-    from utils import (
-        combine_tropo_corrections,
-        extract_sensing_times_from_file,
-        parse_date,
-    )
+    from utils import parse_date
 
     start_dt = parse_date(start)
     end_dt = parse_date(end)
@@ -545,15 +541,6 @@ def stage_window(
             frame_id=frame_id,
             to_disp_epsg=True,
         )
-        # Determine reprojected corrections directory from first file's EPSG
-        import rioxarray as rxr
-
-        with rxr.open_rasterio(disp_files[0]) as _disp:
-            epsg = _disp.rio.crs.to_epsg()
-        corrections_dir = tropo_dir / f"tropo_corrections_{epsg}"
-        for disp_file in disp_files:
-            times = extract_sensing_times_from_file(disp_file)
-            combine_tropo_corrections(corrections_dir, times[0], times[1])
         logger.info("      Tropo corrections: %s", tropo_dir)
 
     if not skip_gnss:

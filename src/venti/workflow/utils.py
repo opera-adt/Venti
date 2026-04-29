@@ -87,55 +87,64 @@ def datetime_to_decimal_year(dt: datetime) -> float:
 
 def match_correction_to_displacement(
     correction_files: list[Path] | None, displacement_files: list[Path]
-) -> list[tuple[Path | None, Path]]:
-    """Match correction files to displacement files by date.
+) -> list[tuple[Path | None, Path | None, Path]]:
+    """Match per-epoch correction files to displacement files by date.
+
+    Each displacement file covers a reference-secondary epoch pair.  The
+    caller is expected to supply one correction file per sensing epoch so
+    that the calibration workflow can form the differential correction
+    (secondary minus reference) itself.
 
     Parameters
     ----------
     correction_files : list of Path or None
-        List of correction files (e.g., tropospheric corrections).
-        If ``None``, returns pairs with ``None`` for the correction file.
+        Per-epoch correction files (one file per sensing time, containing a
+        single date in the filename).  If ``None``, returns triples with
+        ``None`` for both correction slots.
     displacement_files : list of Path
-        List of displacement files
+        Displacement files, each containing both a reference and a secondary
+        date in the filename.
 
     Returns
     -------
     list of tuple
-        List of ``(correction_file, displacement_file)`` pairs where
-        ``correction_file`` is ``None`` when no corrections are available.
+        ``(ref_correction_file, sec_correction_file, displacement_file)``
+        triples.  Either correction slot is ``None`` when the corresponding
+        epoch file cannot be found.
 
     Examples
     --------
     ::
 
-        tropo_files = sorted(Path('tropo/').glob('*.tif'))
+        tropo_files = sorted(Path('tropo/tropo_corrections_32611/').glob('*.tif'))
         disp_files = sorted(Path('disp/').glob('*.nc'))
         matches = match_correction_to_displacement(tropo_files, disp_files)
 
     """
-    # Build dictionaries keyed by dates
-    if correction_files is not None:
-        corr_dict = {extract_dates_from_filename(f): f for f in correction_files}
     disp_dict = {extract_dates_from_filename(f): f for f in displacement_files}
 
-    matches: list[tuple[Path | None, Path]] = []
-
-    # If no corrections, pair with None
     if correction_files is None:
-        for _dates, disp_file in disp_dict.items():
-            matches.append((None, disp_file))
-        return matches
+        return [(None, None, disp_file) for disp_file in disp_dict.values()]
 
-    # Match by dates
-    for dates, disp_file in disp_dict.items():
-        # Prefer a combined differential file keyed by (ref_date, sec_date)
-        if dates in corr_dict:
-            matches.append((corr_dict[dates], disp_file))
-        # Fall back to a single-epoch file keyed by (None, secondary_date)
-        elif (None, dates[1]) in corr_dict:
-            matches.append((corr_dict[(None, dates[1])], disp_file))
-        else:
-            logger.warning(f"No correction file matched for {dates}")
+    # Build a lookup keyed by the single epoch date found in each correction file
+    corr_dict: dict[date, Path] = {}
+    for f in correction_files:
+        ref_date, sec_date = extract_dates_from_filename(f)
+        epoch_date = sec_date if sec_date is not None else ref_date
+        if epoch_date is not None:
+            corr_dict[epoch_date] = f
+
+    matches: list[tuple[Path | None, Path | None, Path]] = []
+    for (ref_date, sec_date), disp_file in disp_dict.items():
+        ref_tropo = corr_dict.get(ref_date) if ref_date is not None else None
+        sec_tropo = corr_dict.get(sec_date) if sec_date is not None else None
+        if ref_tropo is None or sec_tropo is None:
+            logger.warning(
+                f"Missing tropo file(s) for {disp_file.name}: "
+                f"ref={'found' if ref_tropo else 'missing'}, "
+                f"sec={'found' if sec_tropo else 'missing'}"
+            )
+        matches.append((ref_tropo, sec_tropo, disp_file))
 
     return matches
 

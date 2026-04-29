@@ -143,7 +143,8 @@ def run_command(config_file: str, log_level: str = "INFO") -> None:
 def run_single_command(
     config_file: str,
     disp_file: str,
-    tropo_file: str | None = None,
+    tropo_ref_file: str | None = None,
+    tropo_sec_file: str | None = None,
     log_level: str = "INFO",
 ) -> None:
     """Calibrate a single displacement file.
@@ -154,8 +155,10 @@ def run_single_command(
         Path to YAML configuration file.
     disp_file : str
         Path to the NetCDF displacement file to calibrate.
-    tropo_file : str, optional
-        Path to a tropospheric correction GeoTIFF for this epoch.
+    tropo_ref_file : str, optional
+        Per-epoch tropospheric correction GeoTIFF for the reference date.
+    tropo_sec_file : str, optional
+        Per-epoch tropospheric correction GeoTIFF for the secondary date.
     log_level : str
         Logging level (DEBUG, INFO, WARNING, ERROR), default: INFO.
 
@@ -165,7 +168,7 @@ def run_single_command(
 
         venti run-single runconfig.yaml /data/disp/epoch_001.nc
         venti run-single runconfig.yaml /data/disp/epoch_001.nc \
-            --tropo-file /data/tropo/tropo_001.tif
+            --tropo-ref-file /data/tropo/ref.tif --tropo-sec-file /data/tropo/sec.tif
         venti run-single runconfig.yaml /data/disp/epoch_001.nc --log-level DEBUG
 
     """
@@ -186,7 +189,8 @@ def run_single_command(
         workflow = CalibrationWorkflow(config=config)
         state = workflow.run_single(
             disp_file=Path(disp_file),
-            tropo_file=Path(tropo_file) if tropo_file is not None else None,
+            tropo_ref_file=Path(tropo_ref_file) if tropo_ref_file is not None else None,
+            tropo_sec_file=Path(tropo_sec_file) if tropo_sec_file is not None else None,
         )
 
         if state.n_files_failed:
