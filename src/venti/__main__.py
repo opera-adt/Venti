@@ -83,21 +83,29 @@ def config_command(output_dir: str = ".") -> None:
         sys.exit(1)
 
 
-def run_command(config_file: str, log_level: str = "INFO") -> None:
+def run_command(config_file: str, n_workers: int = 1, log_level: str = "INFO") -> None:
     """Run the Venti calibration workflow.
 
     Parameters
     ----------
     config_file : str
-        Path to YAML configuration file
+        Path to YAML configuration file.
+    n_workers : int, optional
+        Number of displacement files to process concurrently.  Each worker
+        runs one epoch at a time using threads, so file I/O for one epoch
+        overlaps with surface fitting for another.  The inner
+        ``fit_windowed_surface`` worker count is automatically reduced to
+        ``cpu_count // n_workers`` to keep total thread usage within the
+        CPU budget.  Values of 2-4 are recommended; default is 1 (serial).
     log_level : str
-        Logging level (DEBUG, INFO, WARNING, ERROR), default: INFO
+        Logging level (DEBUG, INFO, WARNING, ERROR), default: INFO.
 
     Examples
     --------
     ::
 
         python -m venti run config.yaml
+        python -m venti run config.yaml --n-workers 4
         python -m venti run config.yaml --log-level DEBUG
 
     """
@@ -125,7 +133,7 @@ def run_command(config_file: str, log_level: str = "INFO") -> None:
         # Run workflow using OO API
         logger.info("Starting calibration workflow...")
         workflow = CalibrationWorkflow(config=config)
-        workflow.run()
+        workflow.run(n_workers=n_workers)
 
         logger.info("Workflow completed successfully!")
 

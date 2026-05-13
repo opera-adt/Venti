@@ -122,7 +122,8 @@ run_data_staging(
 Stage all DISP-S1 products for a frame whose secondary date falls within a given
 range.  DEM, LOS geometry, and GNSS velocities are produced once and shared
 across all products.  Tropospheric corrections are batched over all unique epoch
-sensing times and combined into per-product differential files.
+sensing times.  The differential (secondary minus reference) is formed
+per-product inside the calibration workflow.
 
 **CLI:**
 
@@ -202,10 +203,9 @@ python disp_cli.py preview --frame-id 8887 --start 2016-01-01 --end 2017-01-01 -
 │   ├── tropo_urls.txt
 │   ├── cropped_tropo/
 │   ├── tropo_corrections/               # per-epoch absolute delays
-│   └── tropo_corrections_{epsg}/        # reprojected; includes differential
-│       ├── tropo_correction_{ref}_{epsg}.tif
-│       ├── tropo_correction_{sec}_{epsg}.tif
-│       └── tropo_correction_{ref}_{sec}_{epsg}.tif  # combined (sec - ref)
+│   └── tropo_corrections_{epsg}/        # reprojected per-epoch corrections
+│       ├── tropo_{ref_timestamp}_{epsg}.tif
+│       └── tropo_{sec_timestamp}_{epsg}.tif
 └── gnss/
     ├── grid_latlon_lookup.txt
     ├── stations/
@@ -251,7 +251,11 @@ Two modes are available depending on whether you want to process a full director
 **Batch run** — calibrates all `.nc` files found in `input_files`:
 
 ```bash
+# Serial (default)
 python -m venti run configs/runconfig.yaml
+
+# Process up to 4 files concurrently (recommended range: 2–4)
+python -m venti run configs/runconfig.yaml --n-workers 4
 ```
 
 **Single-file run** — calibrates one specified displacement file:
@@ -260,11 +264,12 @@ python -m venti run configs/runconfig.yaml
 python -m venti run-single configs/runconfig.yaml /path/to/epoch_001.nc
 ```
 
-With an optional tropospheric correction for that epoch:
+With optional tropospheric corrections (provide both the reference- and secondary-date files):
 
 ```bash
 python -m venti run-single configs/runconfig.yaml /path/to/epoch_001.nc \
-    --tropo-file /path/to/tropo_001.tif
+    --tropo-ref-file /path/to/tropo/tropo_{ref_timestamp}_{epsg}.tif \
+    --tropo-sec-file /path/to/tropo/tropo_{sec_timestamp}_{epsg}.tif
 ```
 
 `algorithm_parameters.yaml` is auto-discovered from the same directory as `runconfig.yaml`, so keep both files together. Increase verbosity with `--log-level DEBUG` on either command.
@@ -281,7 +286,12 @@ from venti.workflow.config import load_config
 
 config = load_config("configs/runconfig.yaml")
 workflow = CalibrationWorkflow(config=config)
+
+# Serial (default)
 state = workflow.run()
+
+# Parallel — process 4 files concurrently
+state = workflow.run(n_workers=4)
 
 print(f"Processed: {state.n_files_processed} / {state.n_files_total}")
 for f in state.output_files:
@@ -298,7 +308,16 @@ from venti.workflow.config import load_config
 
 config = load_config("configs/runconfig.yaml")
 workflow = CalibrationWorkflow(config=config)
+
+# Without tropospheric correction
 state = workflow.run_single(disp_file=Path("/path/to/epoch_001.nc"))
+
+# With per-epoch tropospheric corrections
+state = workflow.run_single(
+    disp_file=Path("/path/to/epoch_001.nc"),
+    tropo_ref_file=Path("/path/to/tropo/tropo_{ref_timestamp}_{epsg}.tif"),
+    tropo_sec_file=Path("/path/to/tropo/tropo_{sec_timestamp}_{epsg}.tif"),
+)
 
 print(f"Output: {state.output_files[0]}")
 ```

@@ -7,6 +7,7 @@ the entire calibration process using dataclasses and object composition.
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -369,6 +370,7 @@ class CalibrationWorkflow:
         tropo_ref_file: Path | None = None,
         tropo_sec_file: Path | None = None,
         event_mask_file: Path | None = None,
+        fit_n_jobs: int = -1,
     ) -> Path | None:
         """Process a single displacement file.
 
@@ -401,6 +403,10 @@ class CalibrationWorkflow:
             provided, the event region is filled with nearest valid neighbors
             before calibration surface estimation.  The calibration surface is
             then removed from the full (unmasked) displacement.
+        fit_n_jobs : int, optional
+            Number of parallel workers for ``fit_windowed_surface``.
+            Defaults to ``-1`` (all CPUs).  Set automatically by ``run``
+            to ``cpu_count // n_workers`` when processing files in parallel.
 
         Returns
         -------
@@ -573,7 +579,7 @@ class CalibrationWorkflow:
             window_overlap_x=overlap_x,
             window_overlap_y=overlap_y,
             poly_order=1.5,
-            n_jobs=-1,
+            n_jobs=fit_n_jobs,
             smoothing_sigma=smoothing_sigma,
             smoothing_method=smoothing_method,
             sg_window_length=cal_opts.savitzky_golay.window_length,
@@ -745,15 +751,22 @@ class CalibrationWorkflow:
 
         return self.state
 
-    def run(self, max_files: int | None = None) -> CalibrationState:
+    def run(self, max_files: int | None = None, n_workers: int = 1) -> CalibrationState:
         """Run the complete calibration workflow.
 
         Parameters
         ----------
         max_files : int or None, optional
             Processing only the first ``max_files`` displacement files.
-            Set the number of displacement files to calibrate.
             Default is None (process all files).
+        n_workers : int, optional
+            Number of displacement files to process concurrently using
+            threads.  File I/O for one epoch overlaps with surface fitting
+            for another.  The inner ``fit_windowed_surface`` worker count
+            is automatically set to ``cpu_count // n_workers`` so that
+            inner and outer parallelism together stay within the CPU
+            budget.  Values of 2-4 are recommended; ``1`` (default) is
+            fully serial and matches the previous behaviour.
 
         Returns
         -------
@@ -806,12 +819,29 @@ class CalibrationWorkflow:
             self.config.grid_settings.posting_meters,
         )
 
-        # Process each file
-        for ref_tropo, sec_tropo, disp_file in tqdm(
-            self.matched_files, desc="Calibrating"
-        ):
+        # Divide the CPU budget between outer file workers and inner surface
+        # fitting workers so their product never exceeds the available cores.
+        cpu_count = os.cpu_count() or 1
+        fit_n_jobs = max(1, cpu_count // n_workers) if n_workers > 1 else -1
+
+        if n_workers > 1:
+            logger.info(
+                f"Parallel mode: {n_workers} file workers, "
+                f"{fit_n_jobs} surface-fit workers each "
+                f"(of {cpu_count} available CPUs)"
+            )
+            # Pre-warm the constant-grid GNSS velocity cache before spawning
+            # threads to avoid a check-then-write race on self._gnss_velocity.
+            if self.config.grid_settings.grid_type == "constant":
+                logger.info("Pre-computing GNSS LOS velocity cache...")
+                self.compute_gnss_reference(los_east, los_north, los_up, disp_files[0])
+
+        def _process_one(
+            item: tuple[Path | None, Path | None, Path],
+        ) -> Path | None:
+            ref_tropo, sec_tropo, disp_file = item
             event_mask_file = self._find_event_mask_file(disp_file)
-            output_file = self.process_displacement_file(
+            return self.process_displacement_file(
                 disp_file,
                 los_east,
                 los_north,
@@ -823,13 +853,27 @@ class CalibrationWorkflow:
                 tropo_ref_file=ref_tropo,
                 tropo_sec_file=sec_tropo,
                 event_mask_file=event_mask_file,
+                fit_n_jobs=fit_n_jobs,
             )
 
+        if n_workers > 1:
+            from joblib import Parallel, delayed
+
+            results: list[Path | None] = Parallel(n_jobs=n_workers, prefer="threads")(
+                delayed(_process_one)(item) for item in self.matched_files
+            )
+        else:
+            results = [
+                _process_one(item)
+                for item in tqdm(self.matched_files, desc="Calibrating")
+            ]
+
+        # State updates are serial — no locking needed.
+        for output_file in results:
             if output_file:
                 self.state.output_files.append(output_file)
             else:
                 self.state.n_files_failed += 1
-
             self.state.n_files_processed += 1
 
         # Summary

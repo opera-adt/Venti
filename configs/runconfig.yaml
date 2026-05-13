@@ -28,7 +28,10 @@ calibration_input_group:
   # OPTIONAL: Path to GeoJSON file defining frame boundaries for processing
   frame_bounds: null
 
-  # OPTIONAL: Directory with tropospheric correction NetCDF files
+  # OPTIONAL: Directory containing per-epoch tropospheric correction GeoTIFFs
+  # (one file per sensing date, e.g. tropo_corrections_{epsg}/). The calibration
+  # workflow matches reference- and secondary-date files by date and forms the
+  # differential (secondary minus reference) internally.
   tropo_files: null
 
   # OPTIONAL: Reference point as [row, col] in pixel coordinates, None for automatic selection

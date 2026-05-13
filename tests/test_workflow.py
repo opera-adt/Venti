@@ -736,34 +736,35 @@ class TestMatchCorrectionToDisplacement:
             matches = match_correction_to_displacement(None, disp_files)
 
             assert len(matches) == 2
-            assert all(corr is None for corr, _ in matches)
+            assert all(ref is None and sec is None for ref, sec, _ in matches)
 
     def test_with_matching_corrections(self):
-        """Test matching correction files to displacement files."""
+        """Test matching per-epoch correction files to displacement files."""
         with tempfile.TemporaryDirectory() as tmp:
             tmpdir = Path(tmp)
 
-            # Create displacement files
+            # Create displacement files (shared reference date, two secondary dates)
             disp1 = tmpdir / "disp_20200101T000000_20200115T000000.nc"
             disp2 = tmpdir / "disp_20200101T000000_20200130T000000.nc"
             disp1.touch()
             disp2.touch()
 
-            # Create correction files (match secondary dates)
-            corr1 = tmpdir / "corr_20200115T000000.tif"
-            corr2 = tmpdir / "corr_20200130T000000.tif"
-            corr1.touch()
-            corr2.touch()
+            # Per-epoch correction files: one per sensing date
+            corr_ref = tmpdir / "corr_20200101T000000.tif"  # shared reference epoch
+            corr_sec1 = tmpdir / "corr_20200115T000000.tif"  # secondary of disp1
+            corr_sec2 = tmpdir / "corr_20200130T000000.tif"  # secondary of disp2
+            corr_ref.touch()
+            corr_sec1.touch()
+            corr_sec2.touch()
 
             disp_files = [disp1, disp2]
-            corr_files = [corr1, corr2]
+            corr_files = [corr_ref, corr_sec1, corr_sec2]
             matches = match_correction_to_displacement(corr_files, disp_files)
 
             assert len(matches) == 2
-            # Verify that corrections were matched
-            matched_corr_files = [corr for corr, _ in matches]
-            assert corr1 in matched_corr_files
-            assert corr2 in matched_corr_files
+            matches_by_disp = {disp: (ref, sec) for ref, sec, disp in matches}
+            assert matches_by_disp[disp1] == (corr_ref, corr_sec1)
+            assert matches_by_disp[disp2] == (corr_ref, corr_sec2)
 
 
 class TestDownsampleArray:

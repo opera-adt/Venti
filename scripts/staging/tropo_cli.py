@@ -24,7 +24,6 @@ from opera_utils.tropo import apply_tropo, crop_tropo
 from shapely.geometry import shape
 from tqdm import tqdm
 from utils import (
-    combine_tropo_corrections,
     extract_frame_id_from_filename,
     extract_sensing_times_from_database,
     extract_sensing_times_from_file,
