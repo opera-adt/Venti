@@ -25,9 +25,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Half-wavelength for Sentinel-1 C-band in mm: λ/2 = 0.0555/2 * 1000
-_WAVELENGTH_MM: float = 0.0555 / 2 * 1000
-
 
 @dataclass
 class CalibrationState:
@@ -367,6 +364,7 @@ class CalibrationWorkflow:
         ref_point: tuple[int, int],
         window_size_x: int,
         window_size_y: int,
+        half_wavelength_m: float,
         tropo_ref_file: Path | None = None,
         tropo_sec_file: Path | None = None,
         event_mask_file: Path | None = None,
@@ -407,6 +405,11 @@ class CalibrationWorkflow:
             Number of parallel workers for ``fit_windowed_surface``.
             Defaults to ``-1`` (all CPUs).  Set automatically by ``run``
             to ``cpu_count // n_workers`` when processing files in parallel.
+        half_wavelength_m : float
+            Radar half-wavelength in metres used for unwrapping error correction
+            (one phase cycle = one half-wavelength of range change).
+            Read automatically from the DISP product metadata by ``run`` and
+            ``run_single``.
 
         Returns
         -------
@@ -431,9 +434,9 @@ class CalibrationWorkflow:
 
         logger.debug(f"Processing {disp_file.name}")
 
-        # Read displacement
+        # Read displacement (metres, OPERA DISP-S1 native unit)
         netcdf_data = self.io_reader.read_netcdf(disp_file, variable="displacement")
-        disp = netcdf_data.data * 1000  # Convert to mm
+        disp = netcdf_data.data.copy()
         refy, refx = ref_point
         disp -= disp[refy, refx]
 
@@ -441,14 +444,15 @@ class CalibrationWorkflow:
         if tropo_ref_file is not None and tropo_sec_file is not None:
             ref_tropo_data = self.io_reader.read_geotiff(tropo_ref_file)
             sec_tropo_data = self.io_reader.read_geotiff(tropo_sec_file)
-            tropo_corr = (sec_tropo_data.data - ref_tropo_data.data) * 1000
+            tropo_corr = sec_tropo_data.data - ref_tropo_data.data
             tropo_corr -= tropo_corr[refy, refx]
             disp -= tropo_corr
 
-        # Get GNSS LOS
+        # Get GNSS LOS: compute_gnss_reference returns mm, convert to metres
         gnss_los = self.compute_gnss_reference(
             los_east, los_north, los_up, disp_file, ref_date, sec_date
         )
+        gnss_los = gnss_los / 1000.0
         gnss_los -= gnss_los[refy, refx]
 
         # Apply mask
@@ -486,7 +490,7 @@ class CalibrationWorkflow:
         if apply_unwrap_correction:
             logger.debug("Correcting unwrap errors...")
             disp = correct_region_offset(
-                input_disp=disp, mask=mask, wavelength=_WAVELENGTH_MM
+                input_disp=disp, mask=mask, wavelength=half_wavelength_m
             )
 
         if isinstance(disp, np.ma.MaskedArray):
@@ -593,9 +597,6 @@ class CalibrationWorkflow:
             )
         else:
             calibration_surface_full = calibration_surface
-
-        # Convert back to meters
-        calibration_surface_full = calibration_surface_full / 1000.0
 
         # Build output filename
         grid_type = self.config.grid_settings.grid_type
@@ -719,6 +720,11 @@ class CalibrationWorkflow:
 
         self.state.n_files_total = 1
 
+        from .utils import read_half_wavelength_m
+
+        half_wavelength_m = read_half_wavelength_m(disp_file)
+        logger.info("Radar half-wavelength: %.6f m", half_wavelength_m)
+
         event_mask_file = self._find_event_mask_file(disp_file)
         if event_mask_file is not None:
             logger.info(f"Event mask : {event_mask_file}")
@@ -732,6 +738,7 @@ class CalibrationWorkflow:
             ref_point,
             window_size_pixels,
             window_size_pixels,
+            half_wavelength_m=half_wavelength_m,
             tropo_ref_file=tropo_ref_file,
             tropo_sec_file=tropo_sec_file,
             event_mask_file=event_mask_file,
@@ -819,6 +826,12 @@ class CalibrationWorkflow:
             self.config.grid_settings.posting_meters,
         )
 
+        # Read radar half-wavelength from the first displacement file.
+        from .utils import read_half_wavelength_m
+
+        half_wavelength_m = read_half_wavelength_m(disp_files[0])
+        logger.info("Radar half-wavelength: %.6f m", half_wavelength_m)
+
         # Divide the CPU budget between outer file workers and inner surface
         # fitting workers so their product never exceeds the available cores.
         cpu_count = os.cpu_count() or 1
@@ -850,6 +863,7 @@ class CalibrationWorkflow:
                 ref_point,
                 window_size_pixels,
                 window_size_pixels,
+                half_wavelength_m=half_wavelength_m,
                 tropo_ref_file=ref_tropo,
                 tropo_sec_file=sec_tropo,
                 event_mask_file=event_mask_file,

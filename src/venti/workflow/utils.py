@@ -291,6 +291,54 @@ def get_file_dates(file_path: str | Path) -> tuple[float, float]:
     return ref_decimal, sec_decimal
 
 
+def read_half_wavelength_m(disp_file: Path) -> float:
+    """Read the radar half-wavelength in metres from a DISP product file.
+
+    Reads ``/identification/radar_wavelength`` from the DISP product HDF5
+    file and returns the half-wavelength (full wavelength / 2).
+
+    Parameters
+    ----------
+    disp_file : Path
+        Path to the DISP product NetCDF/HDF5 file.
+
+    Returns
+    -------
+    float
+        Radar half-wavelength in metres.
+
+    Raises
+    ------
+    RuntimeError
+        If ``/identification/radar_wavelength`` cannot be read from the file.
+
+    Examples
+    --------
+    ::
+
+        half_wl = read_half_wavelength_m(Path("OPERA_L3_DISP-S1_...nc"))
+        # Returns ~0.02773 for Sentinel-1 C-band
+
+    """
+    from netCDF4 import Dataset  # type: ignore[import-untyped]
+
+    try:
+        with Dataset(disp_file, "r") as nc:
+            ident_group = nc.groups["identification"]
+            wl_m = float(ident_group.variables["radar_wavelength"][:])
+            wl_units = getattr(ident_group.variables["radar_wavelength"], "units", "m")
+        logger.debug(
+            "Read radar_wavelength %.6f %s from %s", wl_m, wl_units, disp_file.name
+        )
+        return wl_m / 2
+    except Exception as e:
+        msg = (
+            f"Could not read /identification/radar_wavelength from {disp_file.name}. "
+            "Ensure the file is a valid DISP product with an /identification group."
+        )
+        raise RuntimeError(msg) from e
+
+
 def ensure_directory(path: str | Path) -> Path:
     """Ensure directory exists, create if needed.
 
