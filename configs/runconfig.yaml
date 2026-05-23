@@ -8,10 +8,7 @@
 #
 # Only the input group matching your workflow_name needs to be filled in.
 
-# ============================================================================
 # CALIBRATION INPUTS
-# Fill this section if doing calibration workflow
-# ============================================================================
 calibration_input_group:
   # REQUIRED: Directory containing input NetCDF displacement files from OPERA DISP products
   input_files: path/to/displacement/files
@@ -34,13 +31,17 @@ calibration_input_group:
   # differential (secondary minus reference) internally.
   tropo_files: null
 
+  # OPTIONAL: Directory containing per-epoch event mask GeoTIFFs (1=valid, 0=event
+  # region). Each mask file must be named with the displacement file stem as a prefix,
+  # e.g. as produced by generate_event_mask.py. When provided, event-region pixels are
+  # filled with nearest valid neighbors before calibration surface estimation, then the
+  # surface is removed from the full (unmasked) displacement.
+  event_mask_dir: null
+
   # OPTIONAL: Reference point as [row, col] in pixel coordinates, None for automatic selection
   reference_point: null
 
-# ============================================================================
 # DECOMPOSITION INPUTS
-# Fill this section if doing decomposition workflow
-# ============================================================================
 decomposition_input_group:
   # REQUIRED: Directory with ascending geometry displacement files in NetCDF format
   asc_displacement_files: path/to/asc_displacement/
@@ -72,9 +73,8 @@ decomposition_input_group:
   # OPTIONAL: Reference point as [row, col] in pixel coordinates, None for automatic selection
   reference_point: null
 
-# ============================================================================
+
 # SHARED SETTINGS (used by both workflows)
-# ============================================================================
 
 # Output product paths and version
 product_path_group:

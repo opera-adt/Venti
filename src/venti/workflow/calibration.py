@@ -198,9 +198,24 @@ class CalibrationWorkflow:
             msg = "LOS file must be 3-band (east, north, up)"
             raise ValueError(msg)
 
-        # Load mask
+        # Load water mask
         mask_data = self.io_reader.read_geotiff(self.config.input_options.water_mask)
         mask = mask_data.data.astype(bool)
+
+        # Combine with custom mask if provided (logical AND — a pixel must be
+        # valid in both masks to be included in calibration)
+        if self.config.input_options.custom_mask is not None:
+            custom_data = self.io_reader.read_geotiff(
+                self.config.input_options.custom_mask
+            )
+            custom = custom_data.data.astype(bool)
+            assert custom.shape == mask.shape, (
+                f"custom_mask shape {custom.shape} does not match "
+                f"water_mask shape {mask.shape}"
+            )
+            mask = mask & custom
+            n_removed = int((~custom & mask_data.data.astype(bool)).sum())
+            logger.info("Custom mask applied: %d additional pixels masked", n_removed)
 
         logger.info("LOS and mask loaded")
         return los_east, los_north, los_up, mask
