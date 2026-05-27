@@ -38,6 +38,10 @@ calibration_input_group:
   # surface is removed from the full (unmasked) displacement.
   event_mask_dir: null
 
+  # Radar wavelength in metres used to convert phase to displacement.
+  # Default is ~0.05546 m (Sentinel-1 C-band).
+  wavelength_m: 0.05546
+
   # OPTIONAL: Reference point as [row, col] in pixel coordinates, None for automatic selection
   reference_point: null
 

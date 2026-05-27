@@ -17,10 +17,7 @@ from shapely.geometry import shape
 
 logger = logging.getLogger(__name__)
 
-# ==============================================================================
 # Date utilities
-# ==============================================================================
-
 # Supported date formats for parsing
 DATE_FORMATS = ["%Y-%m-%d", "%Y%m%d"]
 
@@ -105,10 +102,7 @@ def parse_date(date_str: str | None) -> datetime | None:
     raise ValueError(msg)
 
 
-# ==============================================================================
 # Burst database utilities
-# ==============================================================================
-
 # Default URL for OPERA consistent burst database
 BURST_DB_URL = (
     "https://github.com/opera-adt/burst_db/releases/download/v0.13.0/"
@@ -164,11 +158,7 @@ def load_burst_database(url: str = BURST_DB_URL) -> gpd.GeoDataFrame:
     return gpd.GeoDataFrame(features, crs="EPSG:4326")
 
 
-# ==============================================================================
 # File parsing utilities
-# ==============================================================================
-
-
 def combine_tropo_corrections(
     corrections_dir: Path,
     ref_time: datetime,

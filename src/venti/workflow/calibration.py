@@ -735,9 +735,7 @@ class CalibrationWorkflow:
 
         self.state.n_files_total = 1
 
-        from .utils import read_half_wavelength_m
-
-        half_wavelength_m = read_half_wavelength_m(disp_file)
+        half_wavelength_m = self.config.input_options.wavelength_m / 2
         logger.info("Radar half-wavelength: %.6f m", half_wavelength_m)
 
         event_mask_file = self._find_event_mask_file(disp_file)
@@ -841,10 +839,7 @@ class CalibrationWorkflow:
             self.config.grid_settings.posting_meters,
         )
 
-        # Read radar half-wavelength from the first displacement file.
-        from .utils import read_half_wavelength_m
-
-        half_wavelength_m = read_half_wavelength_m(disp_files[0])
+        half_wavelength_m = self.config.input_options.wavelength_m / 2
         logger.info("Radar half-wavelength: %.6f m", half_wavelength_m)
 
         # Divide the CPU budget between outer file workers and inner surface

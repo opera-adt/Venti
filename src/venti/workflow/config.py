@@ -450,6 +450,14 @@ class CalibrationInputGroup(BaseModel):
             "full (unmasked) displacement."
         ),
     )
+    wavelength_m: float = Field(
+        0.05546,
+        gt=0,
+        description=(
+            "Radar wavelength in meters used to convert displacement to phase. "
+            "Default is ~0.05546 m (Sentinel-1 C-band)."
+        ),
+    )
     reference_point: tuple[int, int] | None = Field(
         None,
         description=(
