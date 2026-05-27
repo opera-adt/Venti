@@ -379,7 +379,7 @@ class CalibrationWorkflow:
         ref_point: tuple[int, int],
         window_size_x: int,
         window_size_y: int,
-        half_wavelength_m: float,
+        wavelength_m: float,
         tropo_ref_file: Path | None = None,
         tropo_sec_file: Path | None = None,
         event_mask_file: Path | None = None,
@@ -420,11 +420,9 @@ class CalibrationWorkflow:
             Number of parallel workers for ``fit_windowed_surface``.
             Defaults to ``-1`` (all CPUs).  Set automatically by ``run``
             to ``cpu_count // n_workers`` when processing files in parallel.
-        half_wavelength_m : float
-            Radar half-wavelength in metres used for unwrapping error correction
-            (one phase cycle = one half-wavelength of range change).
-            Read automatically from the DISP product metadata by ``run`` and
-            ``run_single``.
+        wavelength_m : float
+            Radar wavelength in metres used for unwrapping error correction
+            (one phase cycle = one full wavelength of range change).
 
         Returns
         -------
@@ -505,7 +503,7 @@ class CalibrationWorkflow:
         if apply_unwrap_correction:
             logger.debug("Correcting unwrap errors...")
             disp = correct_region_offset(
-                input_disp=disp, mask=mask, wavelength=half_wavelength_m
+                input_disp=disp, mask=mask, wavelength=wavelength_m
             )
 
         if isinstance(disp, np.ma.MaskedArray):
@@ -735,8 +733,8 @@ class CalibrationWorkflow:
 
         self.state.n_files_total = 1
 
-        half_wavelength_m = self.config.input_options.wavelength_m / 2
-        logger.info("Radar half-wavelength: %.6f m", half_wavelength_m)
+        wavelength_m = self.config.input_options.wavelength_m
+        logger.info("Radar wavelength: %.6f m", wavelength_m)
 
         event_mask_file = self._find_event_mask_file(disp_file)
         if event_mask_file is not None:
@@ -751,7 +749,7 @@ class CalibrationWorkflow:
             ref_point,
             window_size_pixels,
             window_size_pixels,
-            half_wavelength_m=half_wavelength_m,
+            wavelength_m=wavelength_m,
             tropo_ref_file=tropo_ref_file,
             tropo_sec_file=tropo_sec_file,
             event_mask_file=event_mask_file,
@@ -839,8 +837,8 @@ class CalibrationWorkflow:
             self.config.grid_settings.posting_meters,
         )
 
-        half_wavelength_m = self.config.input_options.wavelength_m / 2
-        logger.info("Radar half-wavelength: %.6f m", half_wavelength_m)
+        wavelength_m = self.config.input_options.wavelength_m
+        logger.info("Radar wavelength: %.6f m", wavelength_m)
 
         # Divide the CPU budget between outer file workers and inner surface
         # fitting workers so their product never exceeds the available cores.
@@ -873,7 +871,7 @@ class CalibrationWorkflow:
                 ref_point,
                 window_size_pixels,
                 window_size_pixels,
-                half_wavelength_m=half_wavelength_m,
+                wavelength_m=wavelength_m,
                 tropo_ref_file=ref_tropo,
                 tropo_sec_file=sec_tropo,
                 event_mask_file=event_mask_file,
