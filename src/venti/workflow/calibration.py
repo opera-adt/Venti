@@ -302,72 +302,35 @@ class CalibrationWorkflow:
         los_up : np.ndarray
             LOS up component
         disp_file : Path
-            Displacement file for dates
+            Displacement file whose grid defines the output raster.
         ref_date : float, optional
-            Reference date
+            Reference epoch as decimal year.
         sec_date : float, optional
-            Secondary date
+            Secondary epoch as decimal year.
 
         Returns
         -------
         np.ndarray
-            GNSS LOS displacement/velocity
+            GNSS LOS displacement in mm, shape ``(ny, nx)``.
 
         """
+        from ..gnss.reference import compute_gnss_los
+
         assert self.gnss_manager is not None, "gnss_manager not initialized"
 
-        output_dir = self.config.run_config.product_path_group.product_path
-        recompute = self.config.grid_settings.recompute_gnss
-
-        if self.config.grid_settings.grid_type == "constant":
-            if not hasattr(self, "_gnss_velocity"):
-                cache_file = output_dir / "gnss_los_velocity.npy"
-                if cache_file.exists() and not recompute:
-                    logger.info(f"Loading cached GNSS LOS velocity from {cache_file}")
-                    self._gnss_velocity = np.load(cache_file)
-                else:
-                    logger.info(
-                        "Computing GNSS LOS velocity from"
-                        f" {self.config.grid_settings.starting_year}"
-                    )
-                    self._gnss_velocity = self.gnss_manager.compute_velocity_los(
-                        los_east=los_east,
-                        los_north=los_north,
-                        los_up=los_up,
-                        netcdf_file=disp_file,
-                        start_year=self.config.grid_settings.starting_year,
-                        method="rbf",
-                    )
-                    np.save(cache_file, self._gnss_velocity)
-                    logger.info(f"Saved GNSS LOS velocity to {cache_file}")
-
-            if ref_date is None or sec_date is None:
-                return self._gnss_velocity
-            # sec_date > ref_date (OPERA convention), so (sec_date - ref_date) > 0.
-            return self._gnss_velocity * (sec_date - ref_date)
-
-        else:
-            if ref_date is None or sec_date is None:
-                msg = "ref_date and sec_date required for variable grid type"
-                raise ValueError(msg)
-
-            cache_file = output_dir / f"gnss_los_disp_{ref_date:.4f}_{sec_date:.4f}.npy"
-            if cache_file.exists() and not recompute:
-                logger.info(f"Loading cached GNSS LOS displacement from {cache_file}")
-                return np.load(cache_file)
-
-            result = self.gnss_manager.compute_displacement_los(
-                ref_date=ref_date,
-                sec_date=sec_date,
-                los_east=los_east,
-                los_north=los_north,
-                los_up=los_up,
-                netcdf_file=disp_file,
-                method="rbf",
-            )
-            np.save(cache_file, result)
-            logger.info(f"Saved GNSS LOS displacement to {cache_file}")
-            return result
+        return compute_gnss_los(
+            gnss_ref=self.gnss_manager,
+            los_east=los_east,
+            los_north=los_north,
+            los_up=los_up,
+            netcdf_file=disp_file,
+            grid_type=self.config.grid_settings.grid_type,
+            cache_dir=self.config.run_config.product_path_group.product_path,
+            ref_date=ref_date,
+            sec_date=sec_date,
+            starting_year=self.config.grid_settings.starting_year,
+            recompute=self.config.grid_settings.recompute_gnss,
+        )
 
     def process_displacement_file(
         self,
@@ -852,8 +815,7 @@ class CalibrationWorkflow:
                 f"{fit_n_jobs} surface-fit workers each "
                 f"(of {cpu_count} available CPUs)"
             )
-            # Pre-warm the constant-grid GNSS velocity cache before spawning
-            # threads to avoid a check-then-write race on self._gnss_velocity.
+
             if self.config.grid_settings.grid_type == "constant":
                 logger.info("Pre-computing GNSS LOS velocity cache...")
                 self.compute_gnss_reference(los_east, los_north, los_up, disp_files[0])

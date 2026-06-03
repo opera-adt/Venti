@@ -251,3 +251,113 @@ class GNSSReference:
             method=method,
             rbf_function=rbf_function,
         )
+
+
+def compute_gnss_los(
+    gnss_ref: GNSSReference,
+    los_east: np.ndarray,
+    los_north: np.ndarray,
+    los_up: np.ndarray,
+    netcdf_file: str | Path,
+    grid_type: str,
+    cache_dir: Path,
+    ref_date: float | None = None,
+    sec_date: float | None = None,
+    starting_year: float = 2014.0,
+    recompute: bool = False,
+) -> np.ndarray:
+    """Compute GNSS LOS displacement or velocity.
+
+    For ``grid_type='constant'`` the function computes a GNSS LOS velocity
+    field (mm/yr) and scales it by the epoch interval
+    ``(sec_date - ref_date)`` to obtain a displacement in mm.  The velocity
+    grid is written once to ``cache_dir/gnss_los_velocity.npy`` and reused
+    for every subsequent epoch.
+
+    For ``grid_type='variable'`` an epoch-specific GNSS LOS displacement is
+    computed for each ``(ref_date, sec_date)`` pair and cached under
+    ``cache_dir/gnss_los_disp_{ref_date:.4f}_{sec_date:.4f}.npy``.
+
+    Parameters
+    ----------
+    gnss_ref : GNSSReference
+        Initialised GNSS reference object with stations already downloaded.
+    los_east : np.ndarray
+        2-D east LOS unit-vector component, shape ``(ny, nx)``.
+    los_north : np.ndarray
+        2-D north LOS unit-vector component.
+    los_up : np.ndarray
+        2-D up LOS unit-vector component.
+    netcdf_file : str or Path
+        NetCDF file that defines the output raster grid.
+    grid_type : str
+        ``'constant'`` or ``'variable'``.
+    cache_dir : Path
+        Directory used for reading and writing ``.npy`` cache files.
+    ref_date : float, optional
+        Reference epoch as decimal year.  Required for ``'variable'`` and
+        for scaling the constant velocity to a displacement.
+    sec_date : float, optional
+        Secondary epoch as decimal year.  Same requirements as ``ref_date``.
+    starting_year : float, optional
+        Earliest observation year for velocity estimation
+        (``grid_type='constant'`` only), by default ``2014.0``.
+    recompute : bool, optional
+        When ``True``, ignore any existing cache file and recompute,
+        by default ``False``.
+
+    Returns
+    -------
+    np.ndarray
+        GNSS LOS field in mm, shape ``(ny, nx)``.
+
+    """
+    logger = logging.getLogger(__name__)
+
+    if grid_type == "constant":
+        cache_file = cache_dir / "gnss_los_velocity.npy"
+        if cache_file.exists() and not recompute:
+            logger.info("Loading cached GNSS LOS velocity from %s", cache_file)
+            velocity = np.load(cache_file)
+        else:
+            logger.info("Computing GNSS LOS velocity from %.4f", starting_year)
+            velocity = gnss_ref.compute_velocity_los(
+                los_east=los_east,
+                los_north=los_north,
+                los_up=los_up,
+                netcdf_file=netcdf_file,
+                start_year=starting_year,
+                method="rbf",
+            )
+            cache_dir.mkdir(parents=True, exist_ok=True)
+            np.save(cache_file, velocity)
+            logger.info("Saved GNSS LOS velocity to %s", cache_file)
+
+        if ref_date is None or sec_date is None:
+            return velocity
+        # sec_date > ref_date (OPERA convention), so the interval is positive.
+        return velocity * (sec_date - ref_date)
+
+    else:
+        if ref_date is None or sec_date is None:
+            msg = "ref_date and sec_date are required for grid_type='variable'"
+            raise ValueError(msg)
+
+        cache_file = cache_dir / f"gnss_los_disp_{ref_date:.4f}_{sec_date:.4f}.npy"
+        if cache_file.exists() and not recompute:
+            logger.info("Loading cached GNSS LOS displacement from %s", cache_file)
+            return np.load(cache_file)
+
+        result = gnss_ref.compute_displacement_los(
+            ref_date=ref_date,
+            sec_date=sec_date,
+            los_east=los_east,
+            los_north=los_north,
+            los_up=los_up,
+            netcdf_file=netcdf_file,
+            method="rbf",
+        )
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        np.save(cache_file, result)
+        logger.info("Saved GNSS LOS displacement to %s", cache_file)
+        return result
