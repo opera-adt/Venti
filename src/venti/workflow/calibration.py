@@ -421,7 +421,7 @@ class CalibrationWorkflow:
             Defaults to ``-1`` (all CPUs).  Set automatically by ``run``
             to ``cpu_count // n_workers`` when processing files in parallel.
         wavelength_m : float
-            Radar wavelength in metres used for unwrapping error correction
+            Radar wavelength in meters used for unwrapping error correction
             (one phase cycle = one full wavelength of range change).
 
         Returns
@@ -452,14 +452,6 @@ class CalibrationWorkflow:
         disp = netcdf_data.data.copy()
         refy, refx = ref_point
         disp -= disp[refy, refx]
-
-        # Apply tropospheric correction: form differential (sec - ref) on the fly
-        if tropo_ref_file is not None and tropo_sec_file is not None:
-            ref_tropo_data = self.io_reader.read_geotiff(tropo_ref_file)
-            sec_tropo_data = self.io_reader.read_geotiff(tropo_sec_file)
-            tropo_corr = sec_tropo_data.data - ref_tropo_data.data
-            tropo_corr -= tropo_corr[refy, refx]
-            disp -= tropo_corr
 
         # Get GNSS LOS: compute_gnss_reference returns mm, convert to metres
         gnss_los = self.compute_gnss_reference(
@@ -611,13 +603,22 @@ class CalibrationWorkflow:
         else:
             calibration_surface_full = calibration_surface
 
+        # Add tropospheric correction to the calibration surface if available.
+        _tropo_applied = tropo_ref_file is not None and tropo_sec_file is not None
+        if tropo_ref_file is not None and tropo_sec_file is not None:
+            ref_tropo_data = self.io_reader.read_geotiff(tropo_ref_file)
+            sec_tropo_data = self.io_reader.read_geotiff(tropo_sec_file)
+            tropo_corr = sec_tropo_data.data - ref_tropo_data.data
+            tropo_corr -= tropo_corr[refy, refx]
+            calibration_surface_full = calibration_surface_full + tropo_corr
+            logger.debug("Tropospheric correction added to calibration surface")
+
         # Build output filename
         grid_type = self.config.grid_settings.grid_type
         ref_frame = self.config.grid_settings.reference_frame.lower()
         suffix = f"_calibration_surface_{grid_type}_{ref_frame}"
         if self.config.grid_settings.downsample_factor > 1:
             suffix += f"_downsample{self.config.grid_settings.downsample_factor}"
-        _tropo_applied = tropo_ref_file is not None and tropo_sec_file is not None
         if _tropo_applied:
             suffix += "_tropo"
         if not apply_unwrap_correction:
