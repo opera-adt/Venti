@@ -45,6 +45,7 @@ dependencies = [
   "shapely",
   "opera-utils",
   "rich",
+  "pyarrow",
   "numba",
   "netcdf4",
   "dem-stitcher",
