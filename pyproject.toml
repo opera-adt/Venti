@@ -46,7 +46,6 @@ dependencies = [
   "opera-utils",
   "numba",
   "netcdf4",
-  "gdal",
   "dem-stitcher",
 ]
 
