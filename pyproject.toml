@@ -44,6 +44,7 @@ dependencies = [
   "joblib",
   "shapely",
   "opera-utils",
+  "rich",
   "numba",
   "netcdf4",
   "dem-stitcher",
