@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import logging
 import sys
-from enum import Enum
+from enum import StrEnum
 
 import tyro
 
@@ -22,11 +22,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-class Command(str, Enum):
+class Command(StrEnum):
     """Available Venti commands."""
 
     config = "config"
     run = "run"
+    run_single = "run-single"
 
 
 def config_command(output_dir: str = ".") -> None:
@@ -82,21 +83,29 @@ def config_command(output_dir: str = ".") -> None:
         sys.exit(1)
 
 
-def run_command(config_file: str, log_level: str = "INFO") -> None:
+def run_command(config_file: str, n_workers: int = 1, log_level: str = "INFO") -> None:
     """Run the Venti calibration workflow.
 
     Parameters
     ----------
     config_file : str
-        Path to YAML configuration file
+        Path to YAML configuration file.
+    n_workers : int, optional
+        Number of displacement files to process concurrently.  Each worker
+        runs one epoch at a time using threads, so file I/O for one epoch
+        overlaps with surface fitting for another.  The inner
+        ``fit_windowed_surface`` worker count is automatically reduced to
+        ``cpu_count // n_workers`` to keep total thread usage within the
+        CPU budget.  Values of 2-4 are recommended; default is 1 (serial).
     log_level : str
-        Logging level (DEBUG, INFO, WARNING, ERROR), default: INFO
+        Logging level (DEBUG, INFO, WARNING, ERROR), default: INFO.
 
     Examples
     --------
     ::
 
         python -m venti run config.yaml
+        python -m venti run config.yaml --n-workers 4
         python -m venti run config.yaml --log-level DEBUG
 
     """
@@ -115,16 +124,88 @@ def run_command(config_file: str, log_level: str = "INFO") -> None:
 
         logger.info("Configuration loaded successfully")
         logger.info(f"  Input directory: {config.input_options.input_files}")
-        logger.info(f"  Output directory: {config.input_options.work_directory}")
+        logger.info(
+            f"  Output directory: {config.run_config.product_path_group.product_path}"
+        )
         logger.info(f"  Grid type: {config.grid_settings.grid_type}")
         logger.info(f"  Reference frame: {config.grid_settings.reference_frame}")
 
         # Run workflow using OO API
         logger.info("Starting calibration workflow...")
         workflow = CalibrationWorkflow(config=config)
-        workflow.run()
+        workflow.run(n_workers=n_workers)
 
         logger.info("Workflow completed successfully!")
+
+    except FileNotFoundError:
+        logger.exception("File not found")
+        sys.exit(1)
+    except ValueError:
+        logger.exception("Configuration error")
+        sys.exit(1)
+    except Exception:
+        logger.exception("Workflow failed")
+        sys.exit(1)
+
+
+def run_single_command(
+    config_file: str,
+    disp_file: str,
+    tropo_ref_file: str | None = None,
+    tropo_sec_file: str | None = None,
+    log_level: str = "INFO",
+) -> None:
+    """Calibrate a single displacement file.
+
+    Parameters
+    ----------
+    config_file : str
+        Path to YAML configuration file.
+    disp_file : str
+        Path to the NetCDF displacement file to calibrate.
+    tropo_ref_file : str, optional
+        Per-epoch tropospheric correction GeoTIFF for the reference date.
+    tropo_sec_file : str, optional
+        Per-epoch tropospheric correction GeoTIFF for the secondary date.
+    log_level : str
+        Logging level (DEBUG, INFO, WARNING, ERROR), default: INFO.
+
+    Examples
+    --------
+    ::
+
+        venti run-single runconfig.yaml /data/disp/epoch_001.nc
+        venti run-single runconfig.yaml /data/disp/epoch_001.nc \
+            --tropo-ref-file /data/tropo/ref.tif --tropo-sec-file /data/tropo/sec.tif
+        venti run-single runconfig.yaml /data/disp/epoch_001.nc --log-level DEBUG
+
+    """
+    from pathlib import Path
+
+    from .workflow.calibration import CalibrationWorkflow
+    from .workflow.config import load_config
+
+    numeric_level = getattr(logging, log_level.upper(), None)
+    if isinstance(numeric_level, int):
+        logging.getLogger().setLevel(numeric_level)
+
+    try:
+        logger.info(f"Loading configuration from: {config_file}")
+        config = load_config(config_file)
+
+        logger.info("Starting single-file calibration...")
+        workflow = CalibrationWorkflow(config=config)
+        state = workflow.run_single(
+            disp_file=Path(disp_file),
+            tropo_ref_file=Path(tropo_ref_file) if tropo_ref_file is not None else None,
+            tropo_sec_file=Path(tropo_sec_file) if tropo_sec_file is not None else None,
+        )
+
+        if state.n_files_failed:
+            logger.error("Calibration failed — check logs above.")
+            sys.exit(1)
+
+        logger.info(f"Output: {state.output_files[0]}")
 
     except FileNotFoundError:
         logger.exception("File not found")
@@ -144,6 +225,7 @@ def main() -> None:
         {
             Command.config: config_command,
             Command.run: run_command,
+            Command.run_single: run_single_command,
         }
     )
 

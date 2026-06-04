@@ -8,10 +8,7 @@
 #
 # Only the input group matching your workflow_name needs to be filled in.
 
-# ============================================================================
 # CALIBRATION INPUTS
-# Fill this section if doing calibration workflow
-# ============================================================================
 calibration_input_group:
   # REQUIRED: Directory containing input NetCDF displacement files from OPERA DISP products
   input_files: path/to/displacement/files
@@ -28,16 +25,27 @@ calibration_input_group:
   # OPTIONAL: Path to GeoJSON file defining frame boundaries for processing
   frame_bounds: null
 
-  # OPTIONAL: Directory with tropospheric correction NetCDF files
+  # OPTIONAL: Directory containing per-epoch tropospheric correction GeoTIFFs
+  # (one file per sensing date, e.g. tropo_corrections_{epsg}/). The calibration
+  # workflow matches reference- and secondary-date files by date and forms the
+  # differential (secondary minus reference) internally.
   tropo_files: null
+
+  # OPTIONAL: Directory containing per-epoch event mask GeoTIFFs (1=valid, 0=event
+  # region). Each mask file must be named with the displacement file stem as a prefix,
+  # e.g. as produced by generate_event_mask.py. When provided, event-region pixels are
+  # filled with nearest valid neighbors before calibration surface estimation, then the
+  # surface is removed from the full (unmasked) displacement.
+  event_mask_dir: null
+
+  # Radar wavelength in metres used to convert phase to displacement.
+  # Default is ~0.05546 m (Sentinel-1 C-band).
+  wavelength_m: 0.05546
 
   # OPTIONAL: Reference point as [row, col] in pixel coordinates, None for automatic selection
   reference_point: null
 
-# ============================================================================
 # DECOMPOSITION INPUTS
-# Fill this section if doing decomposition workflow
-# ============================================================================
 decomposition_input_group:
   # REQUIRED: Directory with ascending geometry displacement files in NetCDF format
   asc_displacement_files: path/to/asc_displacement/
@@ -69,9 +77,8 @@ decomposition_input_group:
   # OPTIONAL: Reference point as [row, col] in pixel coordinates, None for automatic selection
   reference_point: null
 
-# ============================================================================
+
 # SHARED SETTINGS (used by both workflows)
-# ============================================================================
 
 # Output product paths and version
 product_path_group:

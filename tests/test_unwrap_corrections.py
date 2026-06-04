@@ -16,7 +16,6 @@ except ImportError:
     HAS_RASTERIO = False
     Affine = None
 
-from venti.io import read_netcdf
 from venti.unwrap import UnwrapCorrector, correct_region_offset
 
 
@@ -139,116 +138,6 @@ class TestUnwrapCorrector:
         assert corrected is not None
         assert corrected.shape == disp.shape
         assert isinstance(corrected, np.ma.MaskedArray)
-
-
-@pytest.mark.skipif(not HAS_RASTERIO, reason="rasterio not installed")
-class TestReadNetCDF:
-    """Test cases for read_netcdf function."""
-
-    def test_read_netcdf_basic(self):
-        """Test reading NetCDF with basic structure."""
-        # Create temporary NetCDF file
-        with tempfile.NamedTemporaryFile(suffix=".nc", delete=False) as tmp:
-            tmp_path = tmp.name
-
-        try:
-            # Create synthetic data
-            x = np.arange(0, 100, 10)
-            y = np.arange(0, 50, 10)
-            disp_data = np.random.rand(len(y), len(x))
-            mask_data = np.ones((len(y), len(x)), dtype=bool)
-
-            ds = xr.Dataset(
-                {
-                    "displacement": (["y", "x"], disp_data),
-                    "water_mask": (["y", "x"], mask_data),
-                },
-                coords={"x": x, "y": y},
-            )
-
-            ds.to_netcdf(tmp_path)
-
-            # Test reading
-            disp, mask, geo_info = read_netcdf(tmp_path)
-
-            assert disp.shape == disp_data.shape
-            assert mask.shape == mask_data.shape
-            assert "transform" in geo_info
-            assert geo_info["transform"] is not None
-
-        finally:
-            Path(tmp_path).unlink()
-
-    def test_read_netcdf_with_geotransform(self):
-        """Test reading NetCDF with GeoTransform attribute."""
-        with tempfile.NamedTemporaryFile(suffix=".nc", delete=False) as tmp:
-            tmp_path = tmp.name
-
-        try:
-            # Create synthetic data with GeoTransform
-            x = np.arange(0, 100, 10)
-            y = np.arange(0, 50, 10)
-            disp_data = np.random.rand(len(y), len(x))
-            mask_data = np.ones((len(y), len(x)), dtype=bool)
-
-            ds = xr.Dataset(
-                {
-                    "displacement": (["y", "x"], disp_data),
-                    "water_mask": (["y", "x"], mask_data),
-                    "spatial_ref": ([], 0),
-                },
-                coords={"x": x, "y": y},
-            )
-
-            # Add GeoTransform attribute
-            ds["spatial_ref"].attrs["GeoTransform"] = "0.0 10.0 0.0 50.0 0.0 -10.0"
-            ds["spatial_ref"].attrs["crs_wkt"] = (
-                'PROJCS["WGS 84 / UTM zone 11N",GEOGCS["WGS'
-                ' 84",DATUM["WGS_1984",SPHEROID["WGS'
-                ' 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",-117],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0],UNIT["metre",1]]'
-            )
-
-            ds.to_netcdf(tmp_path)
-
-            # Test reading
-            disp, mask, geo_info = read_netcdf(tmp_path)
-
-            assert "transform" in geo_info
-            assert "crs" in geo_info
-            assert geo_info["transform"] is not None
-            assert geo_info["crs"] is not None
-
-            # Check transform values
-            transform = geo_info["transform"]
-            assert transform.a == 10.0  # x pixel size
-            assert transform.e == -10.0  # y pixel size (negative)
-
-        finally:
-            Path(tmp_path).unlink()
-
-    def test_read_netcdf_missing_variable(self):
-        """Test error handling for missing variables."""
-        with tempfile.NamedTemporaryFile(suffix=".nc", delete=False) as tmp:
-            tmp_path = tmp.name
-
-        try:
-            # Create NetCDF without displacement variable
-            x = np.arange(0, 100, 10)
-            y = np.arange(0, 50, 10)
-
-            ds = xr.Dataset(
-                {"water_mask": (["y", "x"], np.ones((len(y), len(x))))},
-                coords={"x": x, "y": y},
-            )
-
-            ds.to_netcdf(tmp_path)
-
-            # Should raise ValueError for missing displacement variable
-            with pytest.raises(ValueError, match="Displacement variable.*not found"):
-                read_netcdf(tmp_path)
-
-        finally:
-            Path(tmp_path).unlink()
 
 
 class TestCorrectRegionOffset:

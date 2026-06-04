@@ -12,6 +12,7 @@ import numpy as np
 import pytest
 import yaml  # type: ignore[import-untyped]
 
+from venti.spatial.resample import downsample_array, upsample_array
 from venti.workflow.config import (
     AlgorithmParameters,
     CalibrationInputGroup,
@@ -30,12 +31,10 @@ from venti.workflow.config import (
 )
 from venti.workflow.utils import (
     datetime_to_decimal_year,
-    downsample_array,
     ensure_directory,
     extract_dates_from_filename,
     match_correction_to_displacement,
     parse_window_size_meters,
-    upsample_array,
 )
 
 
@@ -112,6 +111,48 @@ class TestCalibrationOptions:
         """Test validation of grid_type."""
         with pytest.raises(ValueError, match="grid_type|Input should be"):
             CalibrationOptions(grid_type="invalid")
+
+    def test_smoothing_method_default(self):
+        opts = CalibrationOptions()
+        assert opts.calibration_surface_smoothing_method == "gaussian"
+
+    def test_smoothing_method_valid_values(self):
+        for method in ("gaussian", "gaussian_fft", "hanning_fft", "savitzky_golay"):
+            opts = CalibrationOptions(calibration_surface_smoothing_method=method)
+            assert opts.calibration_surface_smoothing_method == method
+
+    def test_smoothing_method_invalid_value(self):
+        with pytest.raises(ValueError, match="Input should be"):
+            CalibrationOptions(calibration_surface_smoothing_method="box_filter")
+
+    def test_smoothing_sigma_default_is_none(self):
+        opts = CalibrationOptions()
+        assert opts.calibration_surface_smoothing_sigma is None
+
+    def test_smoothing_sigma_zero_accepted(self):
+        """Zero is the sentinel for disabling smoothing — must be accepted."""
+        opts = CalibrationOptions(calibration_surface_smoothing_sigma=0)
+        assert opts.calibration_surface_smoothing_sigma == 0
+
+    def test_smoothing_sigma_negative_rejected(self):
+        with pytest.raises(
+            ValueError, match="greater than or equal to|Input should be"
+        ):
+            CalibrationOptions(calibration_surface_smoothing_sigma=-1.0)
+
+    def test_event_mask_buffer_default_is_zero(self):
+        opts = CalibrationOptions()
+        assert opts.event_mask_buffer_pixels == 0
+
+    def test_event_mask_buffer_custom(self):
+        opts = CalibrationOptions(event_mask_buffer_pixels=15)
+        assert opts.event_mask_buffer_pixels == 15
+
+    def test_event_mask_buffer_negative_rejected(self):
+        with pytest.raises(
+            ValueError, match="greater than or equal to|Input should be"
+        ):
+            CalibrationOptions(event_mask_buffer_pixels=-1)
 
 
 class TestDecompositionOptions:
@@ -695,34 +736,35 @@ class TestMatchCorrectionToDisplacement:
             matches = match_correction_to_displacement(None, disp_files)
 
             assert len(matches) == 2
-            assert all(corr == "None" for corr, _ in matches)
+            assert all(ref is None and sec is None for ref, sec, _ in matches)
 
     def test_with_matching_corrections(self):
-        """Test matching correction files to displacement files."""
+        """Test matching per-epoch correction files to displacement files."""
         with tempfile.TemporaryDirectory() as tmp:
             tmpdir = Path(tmp)
 
-            # Create displacement files
+            # Create displacement files (shared reference date, two secondary dates)
             disp1 = tmpdir / "disp_20200101T000000_20200115T000000.nc"
             disp2 = tmpdir / "disp_20200101T000000_20200130T000000.nc"
             disp1.touch()
             disp2.touch()
 
-            # Create correction files (match secondary dates)
-            corr1 = tmpdir / "corr_20200115T000000.tif"
-            corr2 = tmpdir / "corr_20200130T000000.tif"
-            corr1.touch()
-            corr2.touch()
+            # Per-epoch correction files: one per sensing date
+            corr_ref = tmpdir / "corr_20200101T000000.tif"  # shared reference epoch
+            corr_sec1 = tmpdir / "corr_20200115T000000.tif"  # secondary of disp1
+            corr_sec2 = tmpdir / "corr_20200130T000000.tif"  # secondary of disp2
+            corr_ref.touch()
+            corr_sec1.touch()
+            corr_sec2.touch()
 
             disp_files = [disp1, disp2]
-            corr_files = [corr1, corr2]
+            corr_files = [corr_ref, corr_sec1, corr_sec2]
             matches = match_correction_to_displacement(corr_files, disp_files)
 
             assert len(matches) == 2
-            # Verify that corrections were matched
-            matched_corr_files = [corr for corr, _ in matches]
-            assert corr1 in matched_corr_files
-            assert corr2 in matched_corr_files
+            matches_by_disp = {disp: (ref, sec) for ref, sec, disp in matches}
+            assert matches_by_disp[disp1] == (corr_ref, corr_sec1)
+            assert matches_by_disp[disp2] == (corr_ref, corr_sec2)
 
 
 class TestDownsampleArray:

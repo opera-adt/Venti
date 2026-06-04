@@ -24,6 +24,11 @@ calibration_options:
   # Type: boolean
   unwrap_error_correction: true
 
+  # Recompute GNSS LOS interpolation even if a cached file already exists
+  # Set to false to reuse cached results and skip recomputation
+  # Type: boolean
+  recompute_gnss: true
+
   # Window size for plane fitting in meters
   # Larger windows smooth more but may miss local variations
   # Typical values: 10000-50000
@@ -50,6 +55,23 @@ calibration_options:
   # Should be approximately equal to cutoff_wavelength_meters
   # Type: number
   moving_window_size_meters: 100000.0
+
+  # Number of pixels to dilate the event-mask boundary before filling.
+  # Expands the excluded region to capture near-boundary pixels contaminated
+  # by deformation signal. 0 disables buffering.
+  # Type: integer
+  event_mask_buffer_pixels: 0
+
+  # Post-assembly low-pass filter applied to the calibration surface.
+  # Options: 'gaussian' (default), 'gaussian_fft', 'hanning_fft', 'savitzky_golay'
+  # Type: string
+  calibration_surface_smoothing_method: gaussian
+
+  # Sigma in pixels for the post-assembly smoothing filter.
+  # null = auto-select (window_size_pixels / 8); 0 = disable smoothing entirely.
+  # Ignored when calibration_surface_smoothing_method is 'savitzky_golay'.
+  # Type: number or null
+  calibration_surface_smoothing_sigma: null
 
   # Savitzky-Golay filter parameters (for 'savitzky_golay' method)
   savitzky_golay:

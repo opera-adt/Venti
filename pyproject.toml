@@ -7,7 +7,8 @@ name = "venti"
 authors = [
   { name = "Marin Govorcin", email = "marin.govorcin@jpl.nasa.gov" },
   { name = "Scott Staniewicz", email = "scott.j.staniewicz@jpl.nasa.gov" },
-  { name = "Sara Mirzaee", email = "sara.mirzaee@jpl.nasa.gov" }
+  { name = "Sara Mirzaee", email = "sara.mirzaee@jpl.nasa.gov" },
+  { name = "Talib Oliver-Cabrera", email = "talib.oliver.cabrera@jpl.nasa.gov" },
 ]
 description = "Calibrated OPERA DISP with GNSS and project to vertical direction"
 readme = { file = "README.md", content-type = "text/markdown" }
@@ -35,12 +36,38 @@ dependencies = [
   "geopandas",
   "pyproj>=3.3",
   "psutil",
+  "pydantic>=2.0",
+  "pyyaml",
+  "tqdm",
+  "tyro>=0.9.24",
+  "scikit-image",
+  "joblib",
+  "shapely",
+  "opera-utils",
+  "rich",
+  "pyarrow",
+  "numba",
+  "netcdf4",
+  "dem-stitcher",
 ]
 
 # The version will be written into a version.py upon install, auto-generated
 # see section: setuptools_scm
 # https://setuptools.pypa.io/en/latest/userguide/pyproject_config.html#dynamic-metadata
 dynamic = ["version"]
+
+[project.optional-dependencies]
+test = [
+  "pytest",
+  "pytest-cov",
+  "pytest-randomly",
+  "pytest-recording>=0.13.2",
+  "pytest-xdist",
+  "pre-commit",
+  "ruff",
+  "matplotlib>=3.10.3",
+  "ipykernel",
+]
 
 [project.urls]
 Homepage = "https://github.com/opera-adt/Venti"
@@ -59,6 +86,7 @@ platforms = ["osx-arm64", "linux-64"]
 
 [tool.pixi.pypi-dependencies]
 venti = { path = ".", editable = true }
+dem-stitcher = "*"
 
 [tool.pixi.dependencies]
 python = ">=3.11"
@@ -73,7 +101,18 @@ scipy = "*"
 geopandas = "*"
 pyproj = ">=3.3"
 psutil = "*"
-tyro= ">=0.9.24"
+pydantic = ">=2.0"
+pyyaml = "*"
+tyro = ">=0.9.24"
+tqdm = "*"
+scikit-image = "*"
+joblib = "*"
+shapely = "*"
+opera-utils = "*"
+numba = "*"
+netcdf4 = "*"
+gdal = "*"
+libgdal-netcdf = "*"
 
 [tool.pixi.tasks]
 check = "pre-commit run -a"
@@ -93,6 +132,7 @@ pytest-xdist = "*"
 ruff = "*"
 matplotlib = ">=3.10.3"
 ipython = ">=9.3.0"
+ipykernel = "*"
 lxml = "*"
 ipdb = "*"
 contextily = "*"
@@ -204,4 +244,6 @@ filterwarnings = [
   "ignore:numpy.ufunc size changed.*:RuntimeWarning",
   # Ignore pyproj database path warnings
   "ignore:pyproj unable to set PROJ database path.*:UserWarning",
+  # Ignore numpy scalar conversion deprecation from geopandas/pyproj CRS transforms
+  "ignore:Conversion of an array with ndim > 0 to a scalar.*:DeprecationWarning",
 ]

@@ -8,7 +8,7 @@ This module provides configuration management split into two files:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import yaml  # type: ignore[import-untyped]
 from pydantic import BaseModel, Field, field_validator
@@ -138,6 +138,16 @@ class CalibrationOptions(BaseModel):
         Cutoff wavelength for longwavelength filtering
     moving_window_size_meters : float
         Moving window filter size in meters
+    event_mask_buffer_pixels : int
+        Number of pixels to dilate the event-mask boundary before filling.
+        Use to exclude near-boundary pixels that may be contaminated by
+        the deformation signal.  ``0`` disables buffering.
+    calibration_surface_smoothing_method : str
+        Post-assembly low-pass filter: ``'gaussian'`` (default), ``'gaussian_fft'``,
+        ``'hanning_fft'``, or ``'savitzky_golay'``.
+    calibration_surface_smoothing_sigma : float or None
+        Sigma (pixels) for the smoothing filter; ignored for ``'savitzky_golay'``.
+        ``None`` auto-selects ``window_size_pixels / 8``; ``0`` disables smoothing.
     savitzky_golay : SavitzkyGolayOptions
         Savitzky-Golay filter parameters
     fft_filter : FFTFilterOptions
@@ -163,6 +173,12 @@ class CalibrationOptions(BaseModel):
         True,
         description=(
             "Whether to correct islands for unwrap errors using watershed segmentation"
+        ),
+    )
+    recompute_gnss: bool = Field(
+        True,
+        description=(
+            "Recompute GNSS LOS interpolation even if a cached file already exists"
         ),
     )
     window_size_meters: float = Field(
@@ -192,6 +208,34 @@ class CalibrationOptions(BaseModel):
         100000.0,
         gt=0,
         description="Moving window filter size in meters",
+    )
+    event_mask_buffer_pixels: int = Field(
+        0,
+        ge=0,
+        description=(
+            "Number of pixels to dilate the event-mask boundary before filling.  "
+            "Expands the excluded region to capture near-boundary pixels "
+            "contaminated by the deformation signal.  ``0`` disables buffering."
+        ),
+    )
+    calibration_surface_smoothing_method: Literal[
+        "gaussian", "gaussian_fft", "hanning_fft", "savitzky_golay"
+    ] = Field(
+        "gaussian",
+        description=(
+            "Post-assembly low-pass filter applied to the calibration surface.  "
+            "One of 'gaussian' (spatial-domain, default), 'gaussian_fft', "
+            "'hanning_fft', or 'savitzky_golay'."
+        ),
+    )
+    calibration_surface_smoothing_sigma: float | None = Field(
+        None,
+        ge=0,
+        description=(
+            "Sigma (pixels) for the post-assembly smoothing filter; ignored for "
+            "'savitzky_golay'.  ``None`` (default) auto-selects "
+            "``window_size_pixels / 8``.  Set to 0 to disable smoothing entirely."
+        ),
     )
     savitzky_golay: SavitzkyGolayOptions = Field(
         default_factory=SavitzkyGolayOptions,
@@ -356,6 +400,8 @@ class CalibrationInputGroup(BaseModel):
         Path to GeoJSON file defining frame boundaries
     tropo_files : Path, optional
         Directory with tropospheric correction files
+    event_mask_dir : Path, optional
+        Directory with per-epoch event mask GeoTIFFs (1=valid, 0=event region)
     reference_point : tuple[int, int], optional
         Reference point (row, col), None for auto-select
 
@@ -393,6 +439,25 @@ class CalibrationInputGroup(BaseModel):
         None,
         description="Directory with tropospheric correction NetCDF files (optional)",
     )
+    event_mask_dir: Path | None = Field(
+        None,
+        description=(
+            "Directory containing per-epoch event mask GeoTIFFs (1=valid, 0=event "
+            "region). Each mask file must be named with the displacement file stem as "
+            "a prefix, e.g. as produced by generate_event_mask.py. When provided, "
+            "event-region pixels are filled with nearest valid neighbors before "
+            "calibration surface estimation, then the surface is removed from the "
+            "full (unmasked) displacement."
+        ),
+    )
+    wavelength_m: float = Field(
+        0.05546,
+        gt=0,
+        description=(
+            "Radar wavelength in meters used to convert displacement to phase. "
+            "Default is ~0.05546 m (Sentinel-1 C-band)."
+        ),
+    )
     reference_point: tuple[int, int] | None = Field(
         None,
         description=(
@@ -409,7 +474,9 @@ class CalibrationInputGroup(BaseModel):
             return Path(v)
         return v
 
-    @field_validator("custom_mask", "frame_bounds", "tropo_files", mode="before")
+    @field_validator(
+        "custom_mask", "frame_bounds", "tropo_files", "event_mask_dir", mode="before"
+    )
     @classmethod
     def convert_optional_to_path(cls, v):
         """Convert optional string paths to Path objects."""
@@ -429,7 +496,7 @@ class CalibrationInputGroup(BaseModel):
             raise ValueError(msg)
         return v
 
-    @field_validator("custom_mask", "frame_bounds", "tropo_files")
+    @field_validator("custom_mask", "frame_bounds", "tropo_files", "event_mask_dir")
     @classmethod
     def validate_optional_exists(cls, v):
         """Validate that optional paths exist if provided.
@@ -755,8 +822,9 @@ class RunConfig(BaseModel):
         "extra": "forbid",
     }
 
-    def model_post_init(self, _: object, /) -> None:
+    def model_post_init(self, __context: Any, /) -> None:
         """Validate that the correct input group is provided for the workflow type."""
+        super().model_post_init(__context)
         workflow_name = self.primary_executable.workflow_name
 
         if workflow_name == "calibrate" and self.calibration_input_group is None:
@@ -908,6 +976,11 @@ class VentiConfig(BaseModel):
             def posting_meters(self):
                 cal_opts = self.config.algorithm_parameters.calibration_options
                 return cal_opts.posting_meters
+
+            @property
+            def recompute_gnss(self):
+                cal_opts = self.config.algorithm_parameters.calibration_options
+                return cal_opts.recompute_gnss
 
             @property
             def output_posting_meters(self):

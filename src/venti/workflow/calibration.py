@@ -1,4 +1,4 @@
-"""Object-oriented calibration workflow for InSAR displacement products.
+"""Calibration workflow for InSAR displacement products.
 
 This module provides a high-level CalibrationWorkflow class that orchestrates
 the entire calibration process using dataclasses and object composition.
@@ -7,6 +7,7 @@ the entire calibration process using dataclasses and object composition.
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -109,7 +110,9 @@ class CalibrationWorkflow:
         # same for functions imported from utils, mainly downsample and upsample
 
         # Create output directory
-        self.config.input_options.work_directory.mkdir(parents=True, exist_ok=True)
+        self.config.run_config.product_path_group.product_path.mkdir(
+            parents=True, exist_ok=True
+        )
 
         # Initialize components
         self.io_reader = RasterReader()
@@ -148,19 +151,13 @@ class CalibrationWorkflow:
         bounds = self.io_reader.get_bounds(disp_files[0], as_latlon=False)
 
         # Get UTM EPSG
+        from pyproj import CRS
+
         netcdf_data = self.io_reader.read_netcdf(disp_files[0])
-        utm_crs = netcdf_data.crs
-
-        if hasattr(utm_crs, "to_epsg"):
-            utm_epsg = utm_crs.to_epsg()
-        else:
-            import re
-
-            match = re.search(r"EPSG:(\d+)", str(utm_crs))
-            utm_epsg = int(match.group(1)) if match else None
+        utm_epsg = CRS.from_user_input(netcdf_data.crs).to_epsg()
 
         # Initialize GNSS reference
-        gnss_dir = self.config.input_options.work_directory / "GNSS"
+        gnss_dir = self.config.run_config.product_path_group.product_path / "GNSS"
         self.gnss_manager = GNSSReference(
             bounds=bounds,
             output_dir=gnss_dir,
@@ -201,9 +198,24 @@ class CalibrationWorkflow:
             msg = "LOS file must be 3-band (east, north, up)"
             raise ValueError(msg)
 
-        # Load mask
+        # Load water mask
         mask_data = self.io_reader.read_geotiff(self.config.input_options.water_mask)
         mask = mask_data.data.astype(bool)
+
+        # Combine with custom mask if provided (logical AND — a pixel must be
+        # valid in both masks to be included in calibration)
+        if self.config.input_options.custom_mask is not None:
+            custom_data = self.io_reader.read_geotiff(
+                self.config.input_options.custom_mask
+            )
+            custom = custom_data.data.astype(bool)
+            assert custom.shape == mask.shape, (
+                f"custom_mask shape {custom.shape} does not match "
+                f"water_mask shape {mask.shape}"
+            )
+            mask = mask & custom
+            n_removed = int((~custom & mask_data.data.astype(bool)).sum())
+            logger.info("Custom mask applied: %d additional pixels masked", n_removed)
 
         logger.info("LOS and mask loaded")
         return los_east, los_north, los_up, mask
@@ -214,7 +226,8 @@ class CalibrationWorkflow:
         Parameters
         ----------
         mask : np.ndarray
-            Valid pixel mask
+            Boolean valid-pixel mask (True = valid). Masked pixels are excluded
+            from auto-selection by zeroing their coherence before scoring.
 
         Returns
         -------
@@ -229,26 +242,45 @@ class CalibrationWorkflow:
             )
             return self.config.input_options.reference_point
 
-        # Compute average coherence for auto-selection
+        import tempfile
+
+        import rasterio
+
         from .utils import compute_average_temporal_coherence
 
         disp_files = sorted(self.config.input_options.input_files.glob("*.nc"))
         coherence_file = compute_average_temporal_coherence(
             disp_files,
-            self.config.input_options.work_directory,
+            self.config.run_config.product_path_group.product_path,
             variable="temporal_coherence",
         )
 
-        try:
-            from opera_utils.disp import rebase_reference
+        # Zero out invalid pixels so they cannot be selected as reference
+        with rasterio.open(coherence_file) as src:
+            profile = src.profile.copy()
+            coherence = src.read(1)
 
-            ref_point = rebase_reference.find_reference_point(coherence_file)
-        except Exception as e:
-            logger.warning(f"Auto-selection failed: {e}, using center")
-            return (mask.shape[0] // 2, mask.shape[1] // 2)
-        else:
-            logger.info(f"Auto-selected reference point: {ref_point}")
-            return ref_point
+        valid_mask = mask.squeeze().astype(bool)
+        assert coherence.shape == valid_mask.shape, (
+            f"Coherence shape {coherence.shape} does not match "
+            f"mask shape {valid_mask.shape}"
+        )
+        coherence_masked = np.where(valid_mask, coherence, 0.0).astype(profile["dtype"])
+
+        from opera_utils.disp import rebase_reference
+
+        with tempfile.NamedTemporaryFile(suffix=".tif", delete=False) as tmp:
+            masked_path = Path(tmp.name)
+
+        try:
+            with rasterio.open(masked_path, "w", **profile) as dst:
+                dst.write(coherence_masked, 1)
+            ref_point = rebase_reference.find_reference_point(masked_path)
+        finally:
+            masked_path.unlink(missing_ok=True)
+
+        logger.info(f"Auto-selected reference point: {ref_point}")
+        return ref_point
 
     def compute_gnss_reference(
         self,
@@ -270,52 +302,35 @@ class CalibrationWorkflow:
         los_up : np.ndarray
             LOS up component
         disp_file : Path
-            Displacement file for dates
+            Displacement file whose grid defines the output raster.
         ref_date : float, optional
-            Reference date
+            Reference epoch as decimal year.
         sec_date : float, optional
-            Secondary date
+            Secondary epoch as decimal year.
 
         Returns
         -------
         np.ndarray
-            GNSS LOS displacement/velocity
+            GNSS LOS displacement in mm, shape ``(ny, nx)``.
 
         """
+        from ..gnss.reference import compute_gnss_los
+
         assert self.gnss_manager is not None, "gnss_manager not initialized"
 
-        if self.config.grid_settings.grid_type == "constant":
-            # Use velocities
-            if not hasattr(self, "_gnss_velocity"):
-                logger.info(
-                    "Computing GNSS velocities from"
-                    f" {self.config.grid_settings.starting_year}"
-                )
-                gnss_velocities = self.gnss_manager.compute_velocities(
-                    start_year=self.config.grid_settings.starting_year
-                )
-                gnss_los = gnss_velocities.project_to_los(
-                    los_east, los_north, los_up, disp_file, method="rbf"
-                )
-                self._gnss_velocity = gnss_los
-
-            # Scale by time span
-            if ref_date and sec_date:
-                time_span = ref_date - sec_date
-                return self._gnss_velocity * time_span
-            else:
-                return self._gnss_velocity
-
-        else:
-            # Compute epoch-specific displacement
-            if ref_date is None or sec_date is None:
-                msg = "ref_date and sec_date required for variable grid type"
-                raise ValueError(msg)
-
-            gnss_disp = self.gnss_manager.compute_displacement(ref_date, sec_date)
-            return gnss_disp.project_to_los(
-                los_east, los_north, los_up, disp_file, method="rbf"
-            )
+        return compute_gnss_los(
+            gnss_ref=self.gnss_manager,
+            los_east=los_east,
+            los_north=los_north,
+            los_up=los_up,
+            netcdf_file=disp_file,
+            grid_type=self.config.grid_settings.grid_type,
+            cache_dir=self.config.run_config.product_path_group.product_path,
+            ref_date=ref_date,
+            sec_date=sec_date,
+            starting_year=self.config.grid_settings.starting_year,
+            recompute=self.config.grid_settings.recompute_gnss,
+        )
 
     def process_displacement_file(
         self,
@@ -327,8 +342,11 @@ class CalibrationWorkflow:
         ref_point: tuple[int, int],
         window_size_x: int,
         window_size_y: int,
-        bounds: tuple,
-        tropo_file: Path | None = None,
+        wavelength_m: float,
+        tropo_ref_file: Path | None = None,
+        tropo_sec_file: Path | None = None,
+        event_mask_file: Path | None = None,
+        fit_n_jobs: int = -1,
     ) -> Path | None:
         """Process a single displacement file.
 
@@ -350,10 +368,24 @@ class CalibrationWorkflow:
             Window width
         window_size_y : int
             Window height
-        bounds : tuple
-            Geographic bounds
-        tropo_file : Path, optional
-            Tropospheric correction file path
+        tropo_ref_file : Path, optional
+            Per-epoch tropospheric correction for the reference date.
+        tropo_sec_file : Path, optional
+            Per-epoch tropospheric correction for the secondary date.
+            The net correction applied is ``sec - ref``, reference-point
+            normalised, consistent with the DISP-S1 displacement convention.
+        event_mask_file : Path, optional
+            Per-epoch event mask GeoTIFF (1=valid, 0=event region).  When
+            provided, the event region is filled with nearest valid neighbors
+            before calibration surface estimation.  The calibration surface is
+            then removed from the full (unmasked) displacement.
+        fit_n_jobs : int, optional
+            Number of parallel workers for ``fit_windowed_surface``.
+            Defaults to ``-1`` (all CPUs).  Set automatically by ``run``
+            to ``cpu_count // n_workers`` when processing files in parallel.
+        wavelength_m : float
+            Radar wavelength in meters used for unwrapping error correction
+            (one phase cycle = one full wavelength of range change).
 
         Returns
         -------
@@ -361,8 +393,9 @@ class CalibrationWorkflow:
             Output file path if successful
 
         """
+        from ..spatial.resample import downsample_array, upsample_array
         from ..unwrap import correct_region_offset
-        from .utils import downsample_array, get_file_dates, upsample_array
+        from .utils import get_file_dates
 
         assert self.io_reader is not None, "io_reader not initialized"
         assert self.io_writer is not None, "io_writer not initialized"
@@ -377,41 +410,75 @@ class CalibrationWorkflow:
 
         logger.debug(f"Processing {disp_file.name}")
 
-        # Read displacement
+        # Read displacement (metres, OPERA DISP-S1 native unit)
         netcdf_data = self.io_reader.read_netcdf(disp_file, variable="displacement")
-        disp = netcdf_data.data * 1000  # Convert to mm
+        disp = netcdf_data.data.copy()
         refy, refx = ref_point
         disp -= disp[refy, refx]
 
-        # Apply tropospheric correction if available
-        if tropo_file is not None:
-            tropo_data = self.io_reader.read_geotiff(tropo_file)
-            tropo_corr = tropo_data.data * 1000  # Convert to mm
-            tropo_corr -= tropo_corr[refy, refx]
-            disp -= tropo_corr
-
-        # Get GNSS LOS
+        # Get GNSS LOS: compute_gnss_reference returns mm, convert to metres
         gnss_los = self.compute_gnss_reference(
             los_east, los_north, los_up, disp_file, ref_date, sec_date
         )
+        gnss_los = gnss_los / 1000.0
         gnss_los -= gnss_los[refy, refx]
 
         # Apply mask
         disp = np.where(mask & ~np.isnan(disp), disp, np.nan)
 
-        # Correct unwrap errors
-        logger.debug("Correcting unwrap errors...")
-        disp = correct_region_offset(disp, gnss_los, mask)
+        # Load event mask and build displacement array for calibration fitting.
+        event_mask: np.ndarray | None = None
+        if event_mask_file is not None:
+            event_mask_data = self.io_reader.read_geotiff(event_mask_file)
+            event_mask = event_mask_data.data.astype(bool)
+
+            buffer_px = (
+                self.config.algorithm_parameters.calibration_options.event_mask_buffer_pixels
+            )
+            if buffer_px > 0:
+                from scipy.ndimage import binary_dilation
+
+                # Dilate the event region (False pixels) outward by buffer_px pixels
+                event_mask = ~binary_dilation(~event_mask, iterations=buffer_px)
+                logger.info(
+                    f"Event mask boundary buffered by {buffer_px} px: "
+                    f"{int((~event_mask).sum()):,} total event-region pixels"
+                )
+
+            n_event_pixels = int((~event_mask).sum())
+            logger.debug(
+                f"Event mask loaded from {event_mask_file.name}: "
+                f"{n_event_pixels:,} event-region pixels will be filled for calibration"
+            )
+
+        # Correct unwrap errors (optional)
+        apply_unwrap_correction = (
+            self.config.algorithm_parameters.calibration_options.unwrap_error_correction
+        )
+        if apply_unwrap_correction:
+            logger.debug("Correcting unwrap errors...")
+            disp = correct_region_offset(
+                input_disp=disp, mask=mask, wavelength=wavelength_m
+            )
 
         if isinstance(disp, np.ma.MaskedArray):
             disp = disp.filled(np.nan)
         if isinstance(gnss_los, np.ma.MaskedArray):
             gnss_los = gnss_los.filled(np.nan)
 
+        # Build displacement array for calibration surface estimation.
+        # If an event mask is provided, fill the event region with nearest pixels
+        if event_mask is not None:
+            from ..spatial.interpolation import fill_masked_region
+
+            disp_for_cal = fill_masked_region(disp, event_mask)
+        else:
+            disp_for_cal = disp
+
         # Downsample if requested
         original_shape = disp.shape
         if self.config.grid_settings.downsample_factor > 1:
-            logger.debug(
+            logger.info(
                 f"Downsampling by factor {self.config.grid_settings.downsample_factor} "
                 f"using method '{self.config.grid_settings.downsample_method}'"
             )
@@ -425,16 +492,15 @@ class CalibrationWorkflow:
                         disp_file, variable="temporal_coherence"
                     )
                     weights = coh_data.data
-                    logger.debug("Using temporal coherence as downsampling weights")
+                    logger.info("Downsampling weighted by temporal coherence")
                 except Exception as e:
                     logger.warning(
                         f"Could not load weights for downsampling: {e}. "
                         "Using unweighted downsampling."
                     )
 
-            # Downsample displacement
-            disp_ds = downsample_array(
-                disp,
+            disp_for_cal_ds = downsample_array(
+                disp_for_cal,
                 self.config.grid_settings.downsample_factor,
                 method=self.config.grid_settings.downsample_method,
                 weights=weights,
@@ -455,60 +521,86 @@ class CalibrationWorkflow:
                 1, window_size_y // self.config.grid_settings.downsample_factor
             )
         else:
-            disp_ds = disp
+            disp_for_cal_ds = disp_for_cal
             gnss_los_ds = gnss_los
             win_x_ds = window_size_x
             win_y_ds = window_size_y
 
-        # Fit calibration surface
+        # Fit calibration surface using event-filled displacement so that
+        # transient deformation in the event region does not bias the fit
         logger.debug("Fitting calibration surface...")
+        # Overlap of 50 % ensures Hann-tapered windows sum to near-uniform weight.
+        overlap_x = win_x_ds // 2
+        overlap_y = win_y_ds // 2
+        cal_opts = self.config.algorithm_parameters.calibration_options
+        smoothing_method = cal_opts.calibration_surface_smoothing_method
+        cfg_sigma = cal_opts.calibration_surface_smoothing_sigma
+        if cfg_sigma is None:
+            # Default: 1/8 of the smaller window dimension suppresses seams
+            # without over-smoothing.
+            smoothing_sigma: float | None = min(win_x_ds, win_y_ds) / 8
+        elif cfg_sigma == 0:
+            smoothing_sigma = None
+        else:
+            smoothing_sigma = cfg_sigma
         calibration_surface = self.spatial_processor.fit_windowed_surface(
-            disp_ds,
-            gnss_los_ds,
-            bounds=bounds,
+            insar_data=disp_for_cal_ds,
+            gnss_los=gnss_los_ds,
             window_size_x=win_x_ds,
             window_size_y=win_y_ds,
-            window_overlap_x=10,
-            window_overlap_y=10,
-            poly_order=2,
-            n_jobs=-1,
+            window_overlap_x=overlap_x,
+            window_overlap_y=overlap_y,
+            poly_order=1.5,
+            n_jobs=fit_n_jobs,
+            smoothing_sigma=smoothing_sigma,
+            smoothing_method=smoothing_method,
+            sg_window_length=cal_opts.savitzky_golay.window_length,
+            sg_polyorder=cal_opts.savitzky_golay.polyorder,
         )
 
-        # Apply calibration
-        corrected_ds = disp_ds - calibration_surface
-
-        # Upsample if needed
+        # Upsample calibration surface if needed
         if self.config.grid_settings.downsample_factor > 1:
-            corrected = upsample_array(corrected_ds, original_shape)
+            calibration_surface_full = upsample_array(
+                calibration_surface, original_shape
+            )
         else:
-            corrected = corrected_ds
+            calibration_surface_full = calibration_surface
 
-        # Convert back to meters
-        corrected = corrected / 1000.0
+        # Add tropospheric correction to the calibration surface if available.
+        _tropo_applied = tropo_ref_file is not None and tropo_sec_file is not None
+        if tropo_ref_file is not None and tropo_sec_file is not None:
+            ref_tropo_data = self.io_reader.read_geotiff(tropo_ref_file)
+            sec_tropo_data = self.io_reader.read_geotiff(tropo_sec_file)
+            tropo_corr = sec_tropo_data.data - ref_tropo_data.data
+            tropo_corr -= tropo_corr[refy, refx]
+            calibration_surface_full = calibration_surface_full + tropo_corr
+            logger.debug("Tropospheric correction added to calibration surface")
 
         # Build output filename
         grid_type = self.config.grid_settings.grid_type
         ref_frame = self.config.grid_settings.reference_frame.lower()
-        suffix = f"_corrected_{grid_type}_{ref_frame}"
-        if tropo_file is not None:
-            suffix += "_tropo"
+        suffix = f"_calibration_surface_{grid_type}_{ref_frame}"
         if self.config.grid_settings.downsample_factor > 1:
             suffix += f"_downsample{self.config.grid_settings.downsample_factor}"
+        if _tropo_applied:
+            suffix += "_tropo"
+        if not apply_unwrap_correction:
+            suffix += "_nowrap"
 
         output_file = (
-            self.config.input_options.work_directory / f"{disp_file.stem}{suffix}.tif"
+            self.config.run_config.product_path_group.product_path
+            / f"{disp_file.stem}{suffix}.tif"
         )
 
         # Save
         description = (
-            f"Calibrated displacement ({self.config.grid_settings.grid_type} GNSS"
-            " model)"
+            f"Calibration surface ({self.config.grid_settings.grid_type} GNSS model)"
         )
-        if tropo_file is not None:
+        if _tropo_applied:
             description += " with tropospheric correction"
 
         self.io_writer.write_geotiff(
-            corrected,
+            calibration_surface_full,
             output_file,
             reference_file=disp_file,
             nodata=np.nan,
@@ -518,8 +610,145 @@ class CalibrationWorkflow:
         logger.debug(f"Saved: {output_file.name}")
         return output_file
 
-    def run(self) -> CalibrationState:
+    def _find_event_mask_file(self, disp_file: Path) -> Path | None:
+        """Find the per-epoch event mask file matching a displacement file.
+
+        Looks for a GeoTIFF in ``config.input_options.event_mask_dir`` whose
+        filename starts with the displacement file stem, following the naming
+        convention produced by ``generate_event_mask.py``:
+        ``<disp_stem>_<geojson_stem>_mask.tif``.
+
+        Parameters
+        ----------
+        disp_file : Path
+            Displacement NetCDF file for which to find a matching event mask.
+
+        Returns
+        -------
+        Path or None
+            Path to the matching event mask GeoTIFF, or ``None`` if no
+            ``event_mask_dir`` is configured or no match is found.
+
+        """
+        event_mask_dir = self.config.input_options.event_mask_dir
+        if event_mask_dir is None:
+            return None
+
+        matches = sorted(event_mask_dir.glob(f"{disp_file.stem}_*mask.tif"))
+        if not matches:
+            logger.debug(f"No event mask found for {disp_file.name}")
+            return None
+
+        if len(matches) > 1:
+            logger.warning(
+                f"Multiple event masks found for {disp_file.name}; "
+                f"using {matches[0].name}"
+            )
+        return matches[0]
+
+    def run_single(
+        self,
+        disp_file: Path,
+        tropo_ref_file: Path | None = None,
+        tropo_sec_file: Path | None = None,
+    ) -> CalibrationState:
+        """Run the calibration workflow on a single displacement file.
+
+        Performs the same setup as `run` (GNSS download, LOS/mask loading,
+        reference point selection) but processes only the one specified file.
+
+        Parameters
+        ----------
+        disp_file : Path
+            Path to the NetCDF displacement file to calibrate.
+        tropo_ref_file : Path, optional
+            Per-epoch tropospheric correction GeoTIFF for the reference date.
+        tropo_sec_file : Path, optional
+            Per-epoch tropospheric correction GeoTIFF for the secondary date.
+
+        Returns
+        -------
+        CalibrationState
+            Workflow state with ``n_files_total = 1`` and, on success,
+            one entry in ``output_files``.
+
+        """
+        from .utils import parse_window_size_meters
+
+        assert self.io_reader is not None, "io_reader not initialized"
+
+        logger.info("=" * 60)
+        logger.info("Starting Venti Single-File Calibration")
+        logger.info("=" * 60)
+        logger.info(f"Input file : {disp_file}")
+        if tropo_ref_file is not None:
+            logger.info(f"Tropo ref  : {tropo_ref_file}")
+        if tropo_sec_file is not None:
+            logger.info(f"Tropo sec  : {tropo_sec_file}")
+
+        self.setup_gnss()
+        los_east, los_north, los_up, mask = self.load_los_and_mask()
+        ref_point = self.find_reference_point(mask)
+
+        window_size_pixels = parse_window_size_meters(
+            self.config.grid_settings.window_size_meters,
+            self.config.grid_settings.posting_meters,
+        )
+
+        self.state.n_files_total = 1
+
+        wavelength_m = self.config.input_options.wavelength_m
+        logger.info("Radar wavelength: %.6f m", wavelength_m)
+
+        event_mask_file = self._find_event_mask_file(disp_file)
+        if event_mask_file is not None:
+            logger.info(f"Event mask : {event_mask_file}")
+
+        output_file = self.process_displacement_file(
+            disp_file,
+            los_east,
+            los_north,
+            los_up,
+            mask,
+            ref_point,
+            window_size_pixels,
+            window_size_pixels,
+            wavelength_m=wavelength_m,
+            tropo_ref_file=tropo_ref_file,
+            tropo_sec_file=tropo_sec_file,
+            event_mask_file=event_mask_file,
+        )
+
+        if output_file:
+            self.state.output_files.append(output_file)
+        else:
+            self.state.n_files_failed += 1
+
+        self.state.n_files_processed += 1
+
+        logger.info("=" * 60)
+        logger.info("Single-File Calibration Complete")
+        logger.info("=" * 60)
+        logger.info(f"Output: {output_file or 'FAILED'}")
+
+        return self.state
+
+    def run(self, max_files: int | None = None, n_workers: int = 1) -> CalibrationState:
         """Run the complete calibration workflow.
+
+        Parameters
+        ----------
+        max_files : int or None, optional
+            Processing only the first ``max_files`` displacement files.
+            Default is None (process all files).
+        n_workers : int, optional
+            Number of displacement files to process concurrently using
+            threads.  File I/O for one epoch overlaps with surface fitting
+            for another.  The inner ``fit_windowed_surface`` worker count
+            is automatically set to ``cpu_count // n_workers`` so that
+            inner and outer parallelism together stay within the CPU
+            budget.  Values of 2-4 are recommended; ``1`` (default) is
+            fully serial and matches the previous behaviour.
 
         Returns
         -------
@@ -544,6 +773,8 @@ class CalibrationWorkflow:
 
         # Get displacement files
         disp_files = sorted(self.config.input_options.input_files.glob("*.nc"))
+        if max_files is not None:
+            disp_files = disp_files[:max_files]
         self.state.n_files_total = len(disp_files)
 
         logger.info(f"Processing {self.state.n_files_total} displacement files")
@@ -552,9 +783,7 @@ class CalibrationWorkflow:
         from .utils import match_correction_to_displacement
 
         if self.config.input_options.tropo_files is not None:
-            tropo_files = sorted(
-                self.config.input_options.tropo_files.glob("tropo_corr*.tif")
-            )
+            tropo_files = sorted(self.config.input_options.tropo_files.glob("*.tif"))
             self.matched_files = match_correction_to_displacement(
                 tropo_files, disp_files
             )
@@ -572,15 +801,31 @@ class CalibrationWorkflow:
             self.config.grid_settings.posting_meters,
         )
 
-        # Get bounds
-        bounds = self.io_reader.get_bounds(disp_files[0], as_latlon=False)
+        wavelength_m = self.config.input_options.wavelength_m
+        logger.info("Radar wavelength: %.6f m", wavelength_m)
 
-        # Process each file
-        for tropo_file, disp_file in tqdm(self.matched_files, desc="Calibrating"):
-            # Handle "None" string from match_correction_to_displacement
-            tropo_path = None if tropo_file == "None" else Path(tropo_file)
+        # Divide the CPU budget between outer file workers and inner surface
+        # fitting workers so their product never exceeds the available cores.
+        cpu_count = os.cpu_count() or 1
+        fit_n_jobs = max(1, cpu_count // n_workers) if n_workers > 1 else -1
 
-            output_file = self.process_displacement_file(
+        if n_workers > 1:
+            logger.info(
+                f"Parallel mode: {n_workers} file workers, "
+                f"{fit_n_jobs} surface-fit workers each "
+                f"(of {cpu_count} available CPUs)"
+            )
+
+            if self.config.grid_settings.grid_type == "constant":
+                logger.info("Pre-computing GNSS LOS velocity cache...")
+                self.compute_gnss_reference(los_east, los_north, los_up, disp_files[0])
+
+        def _process_one(
+            item: tuple[Path | None, Path | None, Path],
+        ) -> Path | None:
+            ref_tropo, sec_tropo, disp_file = item
+            event_mask_file = self._find_event_mask_file(disp_file)
+            return self.process_displacement_file(
                 disp_file,
                 los_east,
                 los_north,
@@ -589,15 +834,31 @@ class CalibrationWorkflow:
                 ref_point,
                 window_size_pixels,
                 window_size_pixels,
-                bounds,
-                tropo_file=tropo_path,
+                wavelength_m=wavelength_m,
+                tropo_ref_file=ref_tropo,
+                tropo_sec_file=sec_tropo,
+                event_mask_file=event_mask_file,
+                fit_n_jobs=fit_n_jobs,
             )
 
+        if n_workers > 1:
+            from joblib import Parallel, delayed
+
+            results: list[Path | None] = Parallel(n_jobs=n_workers, prefer="threads")(
+                delayed(_process_one)(item) for item in self.matched_files
+            )
+        else:
+            results = [
+                _process_one(item)
+                for item in tqdm(self.matched_files, desc="Calibrating")
+            ]
+
+        # State updates are serial — no locking needed.
+        for output_file in results:
             if output_file:
                 self.state.output_files.append(output_file)
             else:
                 self.state.n_files_failed += 1
-
             self.state.n_files_processed += 1
 
         # Summary
@@ -608,7 +869,10 @@ class CalibrationWorkflow:
         logger.info(f"Processed: {self.state.n_files_processed}")
         logger.info(f"Failed: {self.state.n_files_failed}")
         logger.info(f"Success rate: {self.state.success_rate:.1f}%")
-        logger.info(f"Output directory: {self.config.input_options.work_directory}")
+        logger.info(
+            "Output directory:"
+            f" {self.config.run_config.product_path_group.product_path}"
+        )
 
         return self.state
 

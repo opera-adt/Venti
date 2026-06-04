@@ -8,12 +8,10 @@ from __future__ import annotations
 
 import logging
 import re
-import warnings
 from datetime import date, datetime
 from pathlib import Path
 
 import numpy as np
-from scipy.ndimage import zoom
 
 logger = logging.getLogger(__name__)
 
@@ -89,218 +87,66 @@ def datetime_to_decimal_year(dt: datetime) -> float:
 
 def match_correction_to_displacement(
     correction_files: list[Path] | None, displacement_files: list[Path]
-) -> list[tuple[str | Path, Path]]:
-    """Match correction files to displacement files by date.
+) -> list[tuple[Path | None, Path | None, Path]]:
+    """Match per-epoch correction files to displacement files by date.
+
+    Each displacement file covers a reference-secondary epoch pair.  The
+    caller is expected to supply one correction file per sensing epoch so
+    that the calibration workflow can form the differential correction
+    (secondary minus reference) itself.
 
     Parameters
     ----------
     correction_files : list of Path or None
-        List of correction files (e.g., tropospheric corrections)
-        If None, returns matches with "None" for corrections
+        Per-epoch correction files (one file per sensing time, containing a
+        single date in the filename).  If ``None``, returns triples with
+        ``None`` for both correction slots.
     displacement_files : list of Path
-        List of displacement files
+        Displacement files, each containing both a reference and a secondary
+        date in the filename.
 
     Returns
     -------
     list of tuple
-        List of (correction_file, displacement_file) pairs
+        ``(ref_correction_file, sec_correction_file, displacement_file)``
+        triples.  Either correction slot is ``None`` when the corresponding
+        epoch file cannot be found.
 
     Examples
     --------
     ::
 
-        tropo_files = sorted(Path('tropo/').glob('*.tif'))
+        tropo_files = sorted(Path('tropo/tropo_corrections_32611/').glob('*.tif'))
         disp_files = sorted(Path('disp/').glob('*.nc'))
         matches = match_correction_to_displacement(tropo_files, disp_files)
 
     """
-    # Build dictionaries keyed by dates
-    if correction_files is not None:
-        corr_dict = {extract_dates_from_filename(f): f for f in correction_files}
     disp_dict = {extract_dates_from_filename(f): f for f in displacement_files}
 
-    matches: list[tuple[str | Path, Path]] = []
-
-    # If no corrections, pair with "None"
     if correction_files is None:
-        for _dates, disp_file in disp_dict.items():
-            matches.append(("None", disp_file))
-        return matches
+        return [(None, None, disp_file) for disp_file in disp_dict.values()]
 
-    # Match by dates
-    for dates, disp_file in disp_dict.items():
-        # Try matching with (None, secondary_date)
-        corr_date_key = (None, dates[1])
-        if corr_date_key in corr_dict:
-            matches.append((corr_dict[corr_date_key], disp_file))
-        else:
-            logger.warning(f"No correction file matched for {dates}")
+    # Build a lookup keyed by the single epoch date found in each correction file
+    corr_dict: dict[date, Path] = {}
+    for f in correction_files:
+        ref_date, sec_date = extract_dates_from_filename(f)
+        epoch_date = sec_date if sec_date is not None else ref_date
+        if epoch_date is not None:
+            corr_dict[epoch_date] = f
+
+    matches: list[tuple[Path | None, Path | None, Path]] = []
+    for (ref_date, sec_date), disp_file in disp_dict.items():
+        ref_tropo = corr_dict.get(ref_date) if ref_date is not None else None
+        sec_tropo = corr_dict.get(sec_date) if sec_date is not None else None
+        if ref_tropo is None or sec_tropo is None:
+            logger.warning(
+                f"Missing tropo file(s) for {disp_file.name}: "
+                f"ref={'found' if ref_tropo else 'missing'}, "
+                f"sec={'found' if sec_tropo else 'missing'}"
+            )
+        matches.append((ref_tropo, sec_tropo, disp_file))
 
     return matches
-
-
-def downsample_array(
-    array: np.ndarray,
-    factor: int,
-    method: str = "mean",
-    weights: np.ndarray | None = None,
-) -> np.ndarray:
-    """Downsample array by given factor using specified aggregation method.
-
-    Parameters
-    ----------
-    array : np.ndarray
-        2D array to downsample
-    factor : int
-        Downsampling factor (e.g., 2 = half resolution)
-    method : str, optional
-        Aggregation method: 'mean' or 'median', by default 'mean'
-    weights : np.ndarray, optional
-        Weight array for weighted downsampling (same shape as array).
-        If provided, computes weighted mean. Ignored if method='median'.
-
-    Returns
-    -------
-    np.ndarray
-        Downsampled array
-
-    Examples
-    --------
-    ::
-
-        # Simple mean downsampling
-        downsampled = downsample_array(data, factor=4)
-
-        # Median downsampling
-        downsampled = downsample_array(data, factor=4, method='median')
-
-        # Weighted mean downsampling
-        downsampled = downsample_array(data, factor=4, method='mean', weights=coherence)
-
-    Notes
-    -----
-    NaN values are handled using nanmean or nanmedian. Blocks with all NaN
-    values will result in NaN in the output.
-
-    """
-    if factor == 1:
-        return array
-
-    if method not in ["mean", "median"]:
-        msg = f"Invalid method '{method}'. Must be 'mean' or 'median'"
-        raise ValueError(msg)
-
-    # Calculate output shape
-    new_shape = (array.shape[0] // factor, array.shape[1] // factor)
-
-    # Trim array to be evenly divisible by factor
-    trimmed_rows = new_shape[0] * factor
-    trimmed_cols = new_shape[1] * factor
-    array_trimmed = array[:trimmed_rows, :trimmed_cols]
-
-    if weights is not None and method == "mean":
-        weights_trimmed = weights[:trimmed_rows, :trimmed_cols]
-        # Ensure weights are valid
-        weights_trimmed = np.where(np.isnan(weights_trimmed), 0, weights_trimmed)
-        weights_trimmed = np.where(weights_trimmed < 0, 0, weights_trimmed)
-
-    # Reshape to blocks
-    blocks = array_trimmed.reshape(
-        new_shape[0], factor, new_shape[1], factor
-    ).transpose(0, 2, 1, 3)
-
-    if method == "mean":
-        if weights is not None:
-            # Weighted mean
-            weight_blocks = weights_trimmed.reshape(
-                new_shape[0], factor, new_shape[1], factor
-            ).transpose(0, 2, 1, 3)
-
-            # Compute weighted mean, handling NaN values
-            with np.errstate(invalid="ignore", divide="ignore"):
-                # Set NaN values to 0 weight
-                weight_blocks_masked = np.where(np.isnan(blocks), 0, weight_blocks)
-                data_masked = np.where(np.isnan(blocks), 0, blocks)
-
-                # Sum of weighted values
-                weighted_sum = np.sum(data_masked * weight_blocks_masked, axis=(2, 3))
-                # Sum of weights
-                weight_sum = np.sum(weight_blocks_masked, axis=(2, 3))
-
-                # Weighted mean
-                downsampled = weighted_sum / weight_sum
-
-                # Set to NaN where all weights are zero
-                downsampled = np.where(weight_sum == 0, np.nan, downsampled)
-        else:
-            # Regular mean, ignoring NaN
-            # Suppress warning about mean of empty slice (when all values are NaN)
-            with warnings.catch_warnings():
-                warnings.filterwarnings("ignore", r"Mean of empty slice")
-                downsampled = np.nanmean(blocks, axis=(2, 3))
-    else:  # median
-        # Use nanmedian, ignoring NaN values
-        # Suppress warning about invalid value encountered
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", r"All-NaN (slice|axis) encountered")
-            downsampled = np.nanmedian(blocks, axis=(2, 3))
-
-    logger.debug(
-        f"Downsampled array from {array.shape} to {downsampled.shape} "
-        f"(factor={factor}, method={method}, weighted={weights is not None})"
-    )
-
-    return downsampled
-
-
-def upsample_array(array: np.ndarray, target_shape: tuple[int, int]) -> np.ndarray:
-    """Upsample array to target shape using bilinear interpolation.
-
-    Parameters
-    ----------
-    array : np.ndarray
-        2D array to upsample
-    target_shape : tuple
-        Target shape (rows, cols)
-
-    Returns
-    -------
-    np.ndarray
-        Upsampled array
-
-    Examples
-    --------
-    ::
-
-        upsampled = upsample_array(downsampled_data, original_shape)
-
-    Notes
-    -----
-    NaN values are preserved during upsampling.
-
-    """
-    if array.shape == target_shape:
-        return array
-
-    # Calculate zoom factors
-    zoom_factors = (target_shape[0] / array.shape[0], target_shape[1] / array.shape[1])
-
-    # Preserve NaN values
-    nan_mask = np.isnan(array)
-    array_filled = np.where(nan_mask, 0, array)
-
-    # Upsample using bilinear interpolation
-    upsampled = zoom(array_filled, zoom_factors, order=1)
-
-    # Upsample mask
-    mask_upsampled = zoom(nan_mask.astype(float), zoom_factors, order=0) > 0.5
-
-    # Re-apply NaN mask
-    upsampled[mask_upsampled] = np.nan
-
-    logger.debug(f"Upsampled array from {array.shape} to {upsampled.shape}")
-
-    return upsampled
 
 
 def compute_average_temporal_coherence(
@@ -340,41 +186,50 @@ def compute_average_temporal_coherence(
 
     logger.info(f"Computing average {variable} from {len(netcdf_files)} files")
 
-    # Read first file to get CRS
-    data_path = f"NETCDF:{netcdf_files[0]}:/{variable}"
-    try:
-        import rasterio as rio
+    # Extract CRS from xarray dataset directly
+    crs = None
+    with xr.open_dataset(netcdf_files[0]) as ds:
+        if "spatial_ref" in ds:
+            sr = ds["spatial_ref"]
+            for attr in ("crs_wkt", "spatial_ref", "wkt"):
+                if attr in sr.attrs:
+                    crs = sr.attrs[attr]
+                    break
+        elif "crs" in ds.attrs:
+            crs = ds.attrs["crs"]
 
-        with rio.open(data_path) as src:
-            crs = src.crs
-    except Exception:
-        crs = None
+    if crs is None:
         logger.warning("Could not extract CRS from NetCDF")
 
-    # Read and stack all files
-    data_arrays = []
+    # Compute incremental mean to avoid loading all files into memory at once
+    acc = None
+    count = 0
     for f in netcdf_files:
-        ds = xr.open_dataset(f)
-        if variable in ds:
-            data_arrays.append(ds[variable])
-        ds.close()
+        with xr.open_dataset(f) as ds:
+            if variable not in ds:
+                continue
+            data = ds[variable].values
+        if acc is None:
+            acc = data.astype("float64")
+        else:
+            acc += data
+        count += 1
 
-    if not data_arrays:
+    if acc is None or count == 0:
         msg = f"Variable '{variable}' not found in any files"
         raise ValueError(msg)
 
-    # Compute mean
-    stacked = xr.concat(data_arrays, dim="stack")
-    average = stacked.mean(dim="stack", skipna=True)
+    average_da = xr.DataArray(
+        (acc / count).astype("float32"),
+        dims=["y", "x"],
+    )
 
-    # Set CRS if available
     if crs is not None:
-        average = average.rio.write_crs(crs)
-        average.rio.set_spatial_dims(x_dim="x", y_dim="y", inplace=True)
+        average_da = average_da.rio.write_crs(crs)
+        average_da.rio.set_spatial_dims(x_dim="x", y_dim="y", inplace=True)
 
-    # Save to GeoTIFF
     output_dir.mkdir(parents=True, exist_ok=True)
-    average.rio.to_raster(output_file)
+    average_da.rio.to_raster(output_file)
 
     logger.info(f"Saved average {variable} to: {output_file}")
     return output_file

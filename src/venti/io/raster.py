@@ -34,7 +34,7 @@ except ImportError:
 
 
 def read_geotiff(
-    file_path: str | Path, band: int = 1
+    file_path: str | Path, band: int | None = None
 ) -> tuple[np.ndarray, dict[str, Any]]:
     """Read a GeoTIFF file and return data with georeferencing.
 
@@ -42,13 +42,15 @@ def read_geotiff(
     ----------
     file_path : str or Path
         Path to GeoTIFF file
-    band : int, optional
-        Band number to read, by default 1
+    band : int or None, optional
+        Band number to read. If None, all bands are read and a 3D array
+        (bands, rows, cols) is returned. For a single-band file with
+        ``band=None``, the result is squeezed to 2D. Default is None.
 
     Returns
     -------
     data : np.ndarray
-        2D array of data
+        2D array (single band) or 3D array (bands, rows, cols)
     geo_info : dict
         Dictionary with 'transform', 'crs', 'nodata'
 
@@ -70,7 +72,12 @@ def read_geotiff(
         raise ImportError(msg)
 
     with rio.open(file_path) as src:
-        data = src.read(band)
+        if band is None:
+            data = src.read()
+            if data.shape[0] == 1:
+                data = data.squeeze(axis=0)
+        else:
+            data = src.read(band)
         geo_info = {
             "transform": src.transform,
             "crs": src.crs,

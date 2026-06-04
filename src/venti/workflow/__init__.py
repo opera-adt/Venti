@@ -25,10 +25,12 @@ __all__ = [
     # Workflow types
     "WorkflowType",
     "calibrate_timeseries",
-    "create_config_template",
+    "create_config_templates",
     "decompose_timeseries",
     "load_config",
     "run_calibration_workflow",
+    "run_data_staging",
+    "run_data_staging_window",
     "run_decomposition_workflow",
     # Functional API
     "run_workflow",
@@ -113,6 +115,18 @@ def __getattr__(name: str):
 
         globals()["decompose_timeseries"] = decompose_timeseries
         return decompose_timeseries
+
+    if name == "run_data_staging":
+        from .run import run_data_staging
+
+        globals()["run_data_staging"] = run_data_staging
+        return run_data_staging
+
+    if name == "run_data_staging_window":
+        from .run import run_data_staging_window
+
+        globals()["run_data_staging_window"] = run_data_staging_window
+        return run_data_staging_window
 
     msg = f"module {__name__!r} has no attribute {name!r}"
     raise AttributeError(msg)
