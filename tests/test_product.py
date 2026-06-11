@@ -134,7 +134,7 @@ class TestCalProduct:
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "test.nc"
 
-            with pytest.raises(ValueError, match="shape.*does not match"):
+            with pytest.raises(ValueError, match=r"shape.*does not match"):
                 CalProduct(
                     output_path=output_path,
                     calibrated_displacement=disp,
@@ -156,7 +156,7 @@ class TestCalProduct:
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "test.nc"
 
-            with pytest.raises(ValueError, match="shape.*does not match"):
+            with pytest.raises(ValueError, match=r"shape.*does not match"):
                 CalProduct(
                     output_path=output_path,
                     calibrated_displacement=disp,
@@ -425,7 +425,7 @@ class TestVlmProduct:
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "test.nc"
 
-            with pytest.raises(ValueError, match="shape.*does not match"):
+            with pytest.raises(ValueError, match=r"shape.*does not match"):
                 VlmProduct(
                     output_path=output_path,
                     east_displacement=east,

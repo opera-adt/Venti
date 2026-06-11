@@ -64,13 +64,13 @@ class TestProcessingOptions:
 
     def test_invalid_method(self):
         """Test validation of downsample_method."""
-        with pytest.raises(ValueError, match="downsample_method|Input should be"):
+        with pytest.raises(ValueError, match=r"downsample_method|Input should be"):
             ProcessingOptions(downsample_method="invalid")
 
     def test_invalid_downsample_factor(self):
         """Test validation of cal_downsample_factor."""
         with pytest.raises(
-            ValueError, match="greater than or equal to|Input should be"
+            ValueError, match=r"greater than or equal to|Input should be"
         ):
             ProcessingOptions(cal_downsample_factor=0)
 
@@ -109,7 +109,7 @@ class TestCalibrationOptions:
 
     def test_invalid_grid_type(self):
         """Test validation of grid_type."""
-        with pytest.raises(ValueError, match="grid_type|Input should be"):
+        with pytest.raises(ValueError, match=r"grid_type|Input should be"):
             CalibrationOptions(grid_type="invalid")
 
     def test_smoothing_method_default(self):
@@ -136,7 +136,7 @@ class TestCalibrationOptions:
 
     def test_smoothing_sigma_negative_rejected(self):
         with pytest.raises(
-            ValueError, match="greater than or equal to|Input should be"
+            ValueError, match=r"greater than or equal to|Input should be"
         ):
             CalibrationOptions(calibration_surface_smoothing_sigma=-1.0)
 
@@ -150,7 +150,7 @@ class TestCalibrationOptions:
 
     def test_event_mask_buffer_negative_rejected(self):
         with pytest.raises(
-            ValueError, match="greater than or equal to|Input should be"
+            ValueError, match=r"greater than or equal to|Input should be"
         ):
             CalibrationOptions(event_mask_buffer_pixels=-1)
 
@@ -187,10 +187,10 @@ class TestDecompositionOptions:
 
     def test_invalid_quality_threshold(self):
         """Test validation of quality_threshold."""
-        with pytest.raises(ValueError, match="less than or equal to|Input should be"):
+        with pytest.raises(ValueError, match=r"less than or equal to|Input should be"):
             DecompositionOptions(quality_threshold=1.5)
         with pytest.raises(
-            ValueError, match="greater than or equal to|Input should be"
+            ValueError, match=r"greater than or equal to|Input should be"
         ):
             DecompositionOptions(quality_threshold=-0.1)
 
@@ -265,15 +265,17 @@ class TestWorkerSettings:
     def test_invalid_block_shape(self):
         """Test validation of block_shape."""
         with pytest.raises(
-            ValueError, match="exactly 2 elements|min_length|List should have at least"
+            ValueError,
+            match=r"exactly 2 elements|min_length|List should have at least",
         ):
             WorkerSettings(block_shape=[512])
         with pytest.raises(
-            ValueError, match="exactly 2 elements|max_length|List should have at most"
+            ValueError,
+            match=r"exactly 2 elements|max_length|List should have at most",
         ):
             WorkerSettings(block_shape=[512, 512, 512])
         with pytest.raises(
-            ValueError, match="dimensions must be positive|greater than"
+            ValueError, match=r"dimensions must be positive|greater than"
         ):
             WorkerSettings(block_shape=[0, 512])
 

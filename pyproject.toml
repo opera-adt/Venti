@@ -46,6 +46,10 @@ dependencies = [
   "opera-utils",
   "rich",
   "pyarrow",
+  "gdal",
+  "aiohttp",
+  "fsspec",
+  "s3fs",
   "numba",
   "netcdf4",
   "dem-stitcher",
@@ -210,6 +214,7 @@ ignore = [
   "D203",   # 1 blank line required before class docstring
   "N806",   # Variable _ in function should be lowercase
   "SIM108", # Use ternary operator
+  "PLC0415", # `import` should be at the top-level of a file (used for lazy imports)
 ]
 
 [tool.ruff.lint.per-file-ignores]

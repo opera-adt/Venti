@@ -67,7 +67,7 @@ class TestUnwrapCorrector:
         mask = np.ones((50, 50), dtype=bool)
 
         # Prepare displacement first
-        scaled_disp, disp_mask = corrector._prepare_displacement(disp)
+        scaled_disp, _disp_mask = corrector._prepare_displacement(disp)
 
         labeled, valid_labels = corrector._watershed_segmentation(scaled_disp, mask)
 
@@ -286,7 +286,7 @@ class TestSaveGeoTIFF:
 
         try:
             # Should raise ValueError when transform is missing
-            with pytest.raises(ValueError, match="transform|reference"):
+            with pytest.raises(ValueError, match=r"transform|reference"):
                 corrector.save_geotiff(
                     corrected_disp=corrected, output_path=tmp_path, crs="EPSG:32611"
                 )

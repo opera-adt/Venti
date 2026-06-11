@@ -386,7 +386,7 @@ def generate_incidence_angle_raster(los_enu_path: Path, output_dir: Path) -> Pat
         crs = los_ds.crs
         height, width = los_up.shape
 
-    mask = los_up == np.nan
+    mask = np.isnan(los_up)
     los_up_masked = np.ma.masked_array(los_up, mask=mask)
     incidence_angle = np.rad2deg(np.arccos(los_up_masked)).filled(0).astype(np.float32)
 
