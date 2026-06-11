@@ -47,6 +47,8 @@ def _fill_gaps_gdal(
 ) -> np.ndarray:
     from osgeo import gdal
 
+    gdal.UseExceptions()
+
     driver = gdal.GetDriverByName("MEM")
     rows, cols = array.shape
     dataset = driver.Create("", cols, rows, 1, gdal.GDT_Float32)
