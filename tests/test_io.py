@@ -293,7 +293,9 @@ class TestWriteGeoTIFF:
 
             data = np.random.rand(50, 50).astype(np.float32)
 
-            with pytest.raises(ValueError, match="transform and crs.*must be provided"):
+            with pytest.raises(
+                ValueError, match=r"transform and crs.*must be provided"
+            ):
                 raster.write_geotiff(data, output_path)
 
     def test_write_geotiff_custom_dtype(self):
@@ -455,7 +457,7 @@ class TestReadNetCDF:
 
             ds.to_netcdf(nc_path)
 
-            with pytest.raises(ValueError, match="Displacement variable.*not found"):
+            with pytest.raises(ValueError, match=r"Displacement variable.*not found"):
                 raster.read_netcdf(nc_path)
 
     def test_read_netcdf_wrong_dimensions(self):
@@ -562,7 +564,7 @@ class TestUpdateNetCDFVariable:
             # Try to update non-existent variable
             new_data = np.ones((len(y), len(x))) * 2.0
 
-            with pytest.raises(ValueError, match="Variable.*not found"):
+            with pytest.raises(ValueError, match=r"Variable.*not found"):
                 raster.update_netcdf_variable(
                     nc_path, "displacement", new_data, create_if_missing=False
                 )

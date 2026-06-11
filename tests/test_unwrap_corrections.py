@@ -286,7 +286,7 @@ class TestSaveGeoTIFF:
 
         try:
             # Should raise ValueError when transform is missing
-            with pytest.raises(ValueError, match="transform|reference"):
+            with pytest.raises(ValueError, match=r"transform|reference"):
                 corrector.save_geotiff(
                     corrected_disp=corrected, output_path=tmp_path, crs="EPSG:32611"
                 )
