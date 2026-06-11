@@ -46,6 +46,7 @@ dependencies = [
   "opera-utils",
   "rich",
   "pyarrow",
+  "gdal",
   "numba",
   "netcdf4",
   "dem-stitcher",
