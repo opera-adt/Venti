@@ -46,8 +46,8 @@ def event_feature(
 ) -> dict[str, Any]:
     """Return the GeoJSON Feature of one event (`remove_restore.Event` schema)."""
     from pyproj import Geod
+    from shapely import transform as _transform
     from shapely.geometry import LineString, mapping
-    from shapely.ops import transform
 
     length = rupture_length_km(magnitude)
     buffer_km = max(min_buffer_km, buffer_factor * length)
@@ -61,7 +61,7 @@ def event_feature(
     aeqd = f"+proj=aeqd +lat_0={lat} +lon_0={lon} +units=m +datum=WGS84"
     fwd = Transformer.from_crs("EPSG:4326", aeqd, always_xy=True).transform
     inv = Transformer.from_crs(aeqd, "EPSG:4326", always_xy=True).transform
-    footprint = transform(fwd, LineString(ends)).buffer(
+    footprint = _transform(LineString(ends), fwd, interleaved=False).buffer(
         buffer_km * 1000.0, quad_segs=16
     )
     return {
@@ -83,7 +83,7 @@ def event_feature(
                 f" {buffer_factor:g} L)"
             ),
         },
-        "geometry": mapping(transform(inv, footprint)),
+        "geometry": mapping(_transform(footprint, inv, interleaved=False)),
     }
 
 
@@ -103,8 +103,8 @@ def eruption_feature(
     the vents' mean position, in kilometres.
     """
     from pyproj import Transformer
+    from shapely import transform as _transform
     from shapely.geometry import LineString, Point, mapping
-    from shapely.ops import transform
 
     if not vents:
         msg = "an eruption needs at least one vent"
@@ -118,7 +118,9 @@ def eruption_feature(
     fwd = Transformer.from_crs("EPSG:4326", aeqd, always_xy=True).transform
     inv = Transformer.from_crs(aeqd, "EPSG:4326", always_xy=True).transform
     trace = LineString(vents) if len(vents) > 1 else Point(vents[0])
-    footprint = transform(fwd, trace).buffer(buffer_km * 1000.0, quad_segs=16)
+    footprint = _transform(trace, fwd, interleaved=False).buffer(
+        buffer_km * 1000.0, quad_segs=16
+    )
     return {
         "type": "Feature",
         "properties": {
@@ -131,5 +133,5 @@ def eruption_feature(
             "buffer_km": buffer_km,
             "footprint_rule": f"line through the vents, buffered by {buffer_km:g} km",
         },
-        "geometry": mapping(transform(inv, footprint)),
+        "geometry": mapping(_transform(footprint, inv, interleaved=False)),
     }
