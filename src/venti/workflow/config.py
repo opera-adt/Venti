@@ -237,7 +237,7 @@ class GnssOptions(BaseModel):
         False,
         description=(
             "Re-estimate the excluded nodes from the surrounding ones with GPS "
-            "Imaging (geepers.gps_imaging.reinterpolate_nodes)"
+            "Imaging (venti.gnss.sampling.reinterpolate_nodes)"
         ),
     )
     reprocessing: bool = Field(
@@ -327,7 +327,7 @@ class FrameOptions(BaseModel):
     @field_validator("plate")
     @classmethod
     def _known_plate(cls, value: str) -> str:
-        from geepers.euler import PLATE_CODES, load_plate_motion_model
+        from venti.models.plate_motion import PLATE_CODES, load_plate_motion_model
 
         code = value.upper()
         if code in PLATE_CODES or code in load_plate_motion_model():

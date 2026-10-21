@@ -13,7 +13,7 @@ velocity (and sigma) fields on the DISP grid:
    variable grid is allowed only in reprocessing mode);
 3. optionally drop the nodes inside curated defo/event areas and
    re-estimate them from the surrounding nodes with GPS Imaging (R-G5,
-   `geepers.gps_imaging.reinterpolate_nodes`);
+   `reinterpolate_nodes`);
 4. interpolate E, N, U and their sigmas onto the target grid;
 5. record provenance (grid version/type/frame, snapshot id, lookup hash,
    node counts, a hash of the sampled field) so DISP-CAL can write it to the
@@ -238,9 +238,89 @@ def _read_rates(cfg: GnssGridConfig, node_ids: np.ndarray) -> tuple[pd.DataFrame
 
 
 #: Fewest nodes outside the exclusion areas to re-interpolate from: the
-#: triangulation behind `geepers.gps_imaging.reinterpolate_nodes` needs at
+#: triangulation behind `reinterpolate_nodes` needs at
 #: least four that are not collinear.
 MIN_REINTERPOLATION_NODES = 4
+
+
+def reinterpolate_nodes(
+    nodes: pd.DataFrame,
+    geom: Any,
+    columns: tuple[tuple[str, str], ...] = VALUE_COLUMNS,
+    *,
+    lon: str = "lon",
+    lat: str = "lat",
+) -> pd.DataFrame:
+    """Replace grid-node values inside `geom` by GPS Imaging estimates from outside.
+
+    GNSS-side remove-restore for the calibration grid (R-G5): the UNR grid is a
+    25 km median-filtered interpolation, so a fast-subsiding basin or a
+    coseismic area leaks into the surrounding nodes. The nodes inside the
+    curated defo/event polygons are re-estimated with the median spatial filter
+    (Hammond et al., 2016) from the nodes outside, so the calibration surface
+    sees only the regional field there.
+
+    Parameters
+    ----------
+    nodes : pd.DataFrame
+        Grid nodes with `lon`, `lat` and the value/sigma columns.
+    geom : shapely.Geometry
+        The exclusion areas, as one (multi)polygon in lon/lat.
+    columns : tuple of (value, sigma) column-name pairs
+        Pairs to re-estimate; pairs whose columns are absent are skipped.
+    lon, lat : str
+        Coordinate column names.
+
+    Returns
+    -------
+    pd.DataFrame
+        A copy of `nodes` with the inside values replaced, their sigmas set to
+        the robust scatter of the contributing nodes (formal sigma where the
+        scatter is undefined), and a boolean ``reinterpolated`` column.
+
+    Raises
+    ------
+    ValueError
+        If every node lies inside `geom`.
+
+    """
+    import shapely
+    from geepers.gps_imaging import msf_interpolate
+
+    x = nodes[lon].to_numpy(float)
+    y = nodes[lat].to_numpy(float)
+    inside = np.asarray(shapely.contains_xy(geom, x, y), dtype=bool)
+
+    out = nodes.copy()
+    out["reinterpolated"] = inside
+    if not inside.any():
+        return out
+    if inside.all():
+        msg = "every node lies inside the exclusion areas; nothing to interpolate from"
+        raise ValueError(msg)
+
+    for value_col, sigma_col in columns:
+        if value_col not in out.columns or sigma_col not in out.columns:
+            continue
+        est = msf_interpolate(
+            x[~inside],
+            y[~inside],
+            out.loc[~inside, value_col].to_numpy(float),
+            out.loc[~inside, sigma_col].to_numpy(float),
+            x[inside],
+            y[inside],
+        )
+        sigma = est["sigma_robust"].to_numpy(float)
+        formal = est["sigma_formal"].to_numpy(float)
+        sigma = np.where(np.isfinite(sigma) & (sigma > 0), sigma, formal)
+        out.loc[inside, value_col] = est["value"].to_numpy(float)
+        out.loc[inside, sigma_col] = sigma
+    logger.info(
+        "Re-interpolated %d of %d grid nodes inside the exclusion areas",
+        int(inside.sum()),
+        inside.size,
+    )
+    return out
 
 
 def _reinterpolate_or_keep(nodes, geom, inside: np.ndarray):
@@ -251,7 +331,6 @@ def _reinterpolate_or_keep(nodes, geom, inside: np.ndarray):
     (collinear, coincident), the excluded nodes are dropped instead, as with
     ``reinterpolate_excluded=False``, and a warning says so.
     """
-    from geepers.gps_imaging import reinterpolate_nodes
     from scipy.spatial import QhullError
 
     n_left = int((~inside).sum())
@@ -345,9 +424,8 @@ def sample_gnss_enu(
     nodes["excluded"] = False
     nodes["reinterpolated"] = False
     if cfg.exclude_defo_nodes and exclude is not None:
-        from geepers._optional import require
+        import shapely
 
-        shapely = require("shapely")
         if hasattr(exclude, "union_all"):
             geom = exclude.union_all()
         elif hasattr(exclude, "geometry"):

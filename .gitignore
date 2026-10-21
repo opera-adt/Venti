@@ -171,3 +171,5 @@ site/
 !tests/data/**
 !src/venti/data/
 !src/venti/data/**
+!src/venti/models/data/
+!src/venti/models/data/**

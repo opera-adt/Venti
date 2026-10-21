@@ -1,6 +1,6 @@
 # ADR-0010: geepers owns UNR access, Euler and GPS Imaging; tropo is shared; validation is separate
 
-- **Status:** accepted
+- **Status:** accepted; amended by ADR-0022 (geepers from opera-adt main, never a fork)
 - **Date:** 2026-10-05
 - **Source:** PRD decision log entry D10 (`docs/specs.md`)
 

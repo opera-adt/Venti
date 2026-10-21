@@ -431,7 +431,7 @@ core:      UNR grid/stations  [disp] [tropo]       core: io, geometry, GNSS→LO
 | D7 | Unwrap correction gated on TS-U1 (islands with GNSS first, inversion residuals inland later). |
 | D8 | CLI and runconfig frozen; new layers through output packaging. |
 | D9 | Defo and event areas: curated static GeoJSON; InSAR and GNSS nodes excluded; GPS Imaging re-interpolation planned. |
-| D10 | geepers is the single source for UNR access, plate motion (Euler) and GPS Imaging; tropo stays in cal-disp and is copied into Venti; separate validation package. |
+| D10 | geepers is the single source for UNR access, plate motion (Euler) and GPS Imaging; tropo stays in cal-disp and is copied into Venti; separate validation package. *Amended 2026-10-20 by ADR-0022: geepers from opera-adt/geepers main, never a fork; plate tables and node re-interpolation live in Venti.* |
 | D11 | Extras-based packaging with `[all]`; avoid over-segmenting. |
 | D12 | Sensor-agnostic Venti; S1 first; NISAR = cal-disp v2 with TS-N1. |
 | D13 | Gamma frozen; v0.5 = CalVal release adopting the trade-study algorithm behind flags. |

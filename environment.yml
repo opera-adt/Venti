@@ -50,4 +50,4 @@ dependencies:
   - pip:
     - opera-utils[disp]
     - dem-stitcher
-    - geepers @ git+https://github.com/opera-adt/geepers.git
+    - geepers @ git+https://github.com/opera-adt/geepers.git  # main (ADR-0022)

@@ -7,41 +7,29 @@ on:
 
 jobs:
   test:
+    # Full suite in the locked pixi `test` environment (conda-forge builds).
+    # Not pip: with geepers in the core (ADR-0022) zarr is installed, and with
+    # pip-wheel HDF5 builds the threaded netCDF reads of the parallel workflow
+    # crash (test_parallel_workers_give_identical_surfaces).
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.11", "3.12", "3.13"]
-
     steps:
       - uses: actions/checkout@v4
-
-      - name: Install GDAL system libraries
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y libgdal-dev gdal-bin
-
-      - uses: actions/setup-python@v5
         with:
-          python-version: ${{ matrix.python-version }}
+          fetch-depth: 0  # setuptools_scm needs the tags for the version
 
-      - name: Install GDAL Python bindings matching system libgdal
-        # Without NumPy at build time (pip's default build isolation) GDAL is built
-        # without osgeo.gdal_array, which Venti's gap filling needs.
-        run: |
-          pip install numpy setuptools wheel
-          pip install --no-build-isolation "gdal==$(gdal-config --version)"
-          python -c "from osgeo import gdal_array"
-
-      - name: Install package and test dependencies
-        run: pip install -e ".[test]"
+      - uses: prefix-dev/setup-pixi@v0.8.10
+        with:
+          environments: test
+          cache: true
 
       - name: Run tests
-        run: pytest
+        run: pixi run -e test test
 
   core-only:
     # The operational image installs Venti with no extras (ADR-0020): the
     # calibration core must install, import and pass its own tests without
-    # dask/zarr/asf_search/dem-stitcher/matplotlib.
+    # asf_search/dem-stitcher/matplotlib/numba (dask and zarr arrive with
+    # geepers, ADR-0022).
     name: Core only (no extras)
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -65,7 +53,8 @@ jobs:
           pip install -e ".[test]"
           python - <<'PY'
           import importlib.util
-          heavy = ["dask", "zarr", "asf_search", "dem_stitcher", "matplotlib", "numba"]
+          # dask and zarr come with geepers (core since ADR-0022)
+          heavy = ["asf_search", "dem_stitcher", "matplotlib", "numba"]
           present = [m for m in heavy if importlib.util.find_spec(m)]
           assert not present, f"core install pulled in {present}"
           PY

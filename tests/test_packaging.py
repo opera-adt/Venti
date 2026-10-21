@@ -114,12 +114,17 @@ def test_extras_are_the_prd_tiers(pyproject):
     ]
 
 
-def test_geepers_is_a_core_dependency_with_the_grid_extra(pyproject):
+def test_geepers_is_a_core_dependency_from_opera_adt(pyproject):
+    """geepers comes from opera-adt/geepers `main`, never a fork (ADR-0022)."""
     geepers = [r for r in pyproject["project"]["dependencies"] if _name(r) == "geepers"]
-    assert len(geepers) == 1
-    assert geepers[0].startswith(
-        "geepers[grid] @ git+https://github.com/mgovorcin/geepers.git@"
-    )
+    assert geepers == ["geepers @ git+https://github.com/opera-adt/geepers.git"]
+
+
+def test_no_dependency_on_personal_forks():
+    """Every git dependency points at an opera-adt repository."""
+    for path in (PYPROJECT, PYPROJECT.parent / "environment.yml"):
+        urls = re.findall(r"git\+https://github\.com/([^/]+)/", path.read_text())
+        assert set(urls) <= {"opera-adt"}, (path.name, urls)
 
 
 def test_ops_environment_is_the_core_only(pyproject):

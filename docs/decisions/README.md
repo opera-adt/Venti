@@ -14,7 +14,7 @@ Architecture decision records backfilled from the PRD decision log
 | [ADR-0007](0007-unwrap-correction-is-gated-on-trade.md) | Unwrap correction is gated on trade study TS-U1 | accepted |
 | [ADR-0008](0008-cli-and-runconfig-are-frozen-new.md) | CLI and runconfig are frozen; new layers come through output packaging | accepted |
 | [ADR-0009](0009-defo-and-event-areas-are-curated.md) | Defo and event areas are curated GeoJSON; nodes and pixels inside are excluded | accepted |
-| [ADR-0010](0010-geepers-owns-unr-access-euler-and.md) | geepers owns UNR access, Euler and GPS Imaging; tropo is shared; validation is separate | accepted |
+| [ADR-0010](0010-geepers-owns-unr-access-euler-and.md) | geepers owns UNR access, Euler and GPS Imaging; tropo is shared; validation is separate | accepted, amended by ADR-0022 |
 | [ADR-0011](0011-extras-based-packaging-with-all.md) | Extras-based packaging with [all] | accepted |
 | [ADR-0012](0012-sensor-agnostic-venti-s1-first-nisar.md) | Sensor-agnostic Venti; S1 first, NISAR as cal-disp v2 | accepted |
 | [ADR-0013](0013-gamma-frozen-v0-5-calval-adopts.md) | Gamma frozen; v0.5 CalVal adopts the trade-study algorithm behind flags | accepted |
@@ -25,3 +25,4 @@ Architecture decision records backfilled from the PRD decision log
 | [ADR-0018](0018-engineering-standards-claude-code-in-the.md) | Engineering standards, Claude Code in the loop, development on forks | accepted |
 | [ADR-0019](0019-the-prd-lives-in-docs-specs.md) | The PRD lives in docs/specs.md | accepted |
 | [ADR-0020](0020-keep-the-package-layout-tiers-by.md) | Keep the package layout; define the lean core by dependency tiers | accepted |
+| [ADR-0022](0022-geepers-from-opera-adt-main.md) | geepers comes from opera-adt/geepers main, never a fork | accepted |

@@ -17,20 +17,20 @@ Example usage:
 import logging
 from contextlib import suppress
 from pathlib import Path
-from typing import Any, Literal, NamedTuple
+from typing import Any, Literal, NamedTuple, cast
 
 import geopandas as gpd
 import numpy as np
 import opera_utils
 import rasterio
 import tyro
-from geepers.euler import plate_velocity_enu
 from pyproj import Transformer
 from rasterio.transform import Affine, from_bounds
 from rasterio.warp import Resampling, reproject
 from tyro import conf
 
 from venti.models import load_gia
+from venti.models.plate_motion import PlateModel, plate_velocity_enu
 
 # Constants
 DEFAULT_CELL_SIZE = 30
@@ -241,10 +241,13 @@ def get_frame_pmm(
         *frame_gdf.total_bounds, width=grid_width, height=grid_height
     )
 
-    # Rigid-plate velocities (mm/yr) from the published ITRF pole (geepers)
+    # Rigid-plate velocities (mm/yr) from the published ITRF pole
     logger.info(f"Computing ITRF{date}-PMM plate velocities for plate '{plate}'")
     ve, vn, _ = plate_velocity_enu(
-        grid_longitudes.ravel(), grid_latitudes.ravel(), plate, model=f"ITRF{date}-PMM"
+        grid_longitudes.ravel(),
+        grid_latitudes.ravel(),
+        plate,
+        model=cast(PlateModel, f"ITRF{date}-PMM"),
     )
     pmm_east_velocity = ve.reshape((grid_height, grid_width))  # East-West component
     pmm_north_velocity = vn.reshape((grid_height, grid_width))  # North-South component
