@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025-2026 opera-adt
+# SPDX-License-Identifier: BSD-3-Clause
+# Part of Venti, https://github.com/opera-adt/Venti (BSD-3-Clause, see LICENSE).
 """End-to-end run of `CalibrationWorkflow` on small synthetic OPERA products.
 
 Everything except the GNSS download is real: NetCDF reading, solid Earth
@@ -11,6 +14,9 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+
+# the stack drivers read DISP through opera_utils.disp (zarr): research tier
+pytest.importorskip("zarr", reason="venti[research] not installed")
 
 rasterio = pytest.importorskip("rasterio")
 xr = pytest.importorskip("xarray")

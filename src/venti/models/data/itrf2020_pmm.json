@@ -8,7 +8,7 @@
         "omega_z": "deg/Myr"
       },
       "coordinate_system": "cartesian",
-      "description": "Rotation pole components for major tectonic plates from ITRF2014 Plate Motion Model"
+      "description": "Rotation pole components for major tectonic plates from the ITRF2020 Plate Motion Model"
     },
     "plates": {
         "AMUR": {

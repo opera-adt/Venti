@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025-2026 opera-adt
+# SPDX-License-Identifier: BSD-3-Clause
+# Part of Venti, https://github.com/opera-adt/Venti (BSD-3-Clause, see LICENSE).
 """Unit tests for workflow module.
 
 This module tests configuration handling and utility functions
@@ -82,7 +85,9 @@ class TestCalibrationOptions:
         opts = CalibrationOptions()
         assert opts.grid_type == "constant"
         assert opts.reference_frame == "IGS20"
-        assert opts.unwrap_error_correction is True
+        assert (
+            opts.unwrap_error_correction is False
+        )  # off until TS-U1 (PRD R-U1), schema v2
         assert opts.window_size_meters == 30000.0
         assert opts.posting_meters == 30.0
         assert opts.apply_tropo_correction is True

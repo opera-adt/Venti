@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025-2026 opera-adt
+# SPDX-License-Identifier: BSD-3-Clause
+# Part of Venti, https://github.com/opera-adt/Venti (BSD-3-Clause, see LICENSE).
 """UNR GNSS grid timeseries download and station velocity estimation.
 
 Interfaces with the University of Nevada, Reno (UNR) geodesy database:
@@ -145,6 +148,9 @@ def find_stations_in_bounds(
         header=None,
         names=["id", "lon", "lat"],
     )
+    # UNR writes 0-360 longitudes; everything downstream (defo-area polygons,
+    # GPS Imaging re-interpolation) uses -180..180
+    df["lon"] = ((df["lon"] + 180.0) % 360.0) - 180.0
     gdf = gpd.GeoDataFrame(
         df,
         geometry=[

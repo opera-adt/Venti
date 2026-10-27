@@ -1,0 +1,747 @@
+# SPDX-FileCopyrightText: 2025-2026 opera-adt
+# SPDX-License-Identifier: BSD-3-Clause
+# Part of Venti, https://github.com/opera-adt/Venti (BSD-3-Clause, see LICENSE).
+"""Two-pass calibration with component bookkeeping (PRD R-S1, D6; plan T33).
+
+`calibrate_pair` turns one DISP pair plus the GNSS LOS field into a
+`CalibrationResult` whose ``calibration`` is **exactly** the sum of its
+components::
+
+    calibration = cal_gnss_surface + cal_reference_offset
+                + cal_tropo + cal_set + cal_unwrap_shift
+
+so ``DISP - calibration`` is always right and every term can be audited or
+undone (PRD §3.1). Two algorithms sit behind ``surface.method``:
+
+- ``"windowed_plane"`` (gamma 0.3): delegates to `venti.surface
+  .estimate_calibration_surface`, so the golden pair reproduces bit for bit;
+- ``"loclin"`` (v0.5): gap filling (T29), local-linear kernel with the
+  half-response cutoff (T30), coherence x robust weights (T31), remove-restore
+  exclusion (T32), and optionally two passes: a robust frame-wide tie, an
+  unwrap hook on ``DISP - CAL1`` whose whole-cycle shifts are applied to the
+  displacement, then the final surface.
+
+Sign convention: every component is *subtracted* from DISP. Corrections
+(tropo, SET) are removed before the fit and restored into the calibration;
+the unwrap shift is what was removed from DISP, so the calibrated product is
+``DISP_shifted - surface``.
+"""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from typing import Any
+
+import numpy as np
+
+from ..spatial.resample import downsample_array, upsample_array
+from ..workflow.config import CalibrationOptions
+from .gaps import base_weights, fill_gaps
+from .loclin import kernel_sigma_px, loclin_surface
+from .remove_restore import sigma_inflation_inside
+from .uncertainty import fit_sigma, resolve_k, sigma_cal
+from .weights import fit_weights
+
+logger = logging.getLogger(__name__)
+
+__all__ = ["CalibrationResult", "UnwrapHook", "calibrate_pair"]
+
+# ``hook(residual, valid, cycle_m) -> (shift, decisions)``: `shift` is the
+# displacement to subtract (same units as the residual, 0 where no change),
+# `decisions` anything the hook wants recorded (plan T36 provides it).
+UnwrapHook = Callable[[np.ndarray, np.ndarray, float], tuple[np.ndarray, Any]]
+
+COMPONENTS = (
+    "cal_gnss_surface",
+    "cal_reference_offset",
+    "cal_tropo",
+    "cal_set",
+    "cal_unwrap_shift",
+)
+
+
+@dataclass
+class CalibrationResult:
+    """Everything `calibrate_pair` produced, component by component.
+
+    All component arrays share the displacement's shape and units. A
+    component that was not applied is all zeros and listed as False in
+    `components_applied`.
+    """
+
+    cal_gnss_surface: np.ndarray
+    cal_reference_offset: np.ndarray
+    cal_tropo: np.ndarray
+    cal_set: np.ndarray
+    cal_unwrap_shift: np.ndarray
+    components_applied: dict[str, bool]
+    method: str
+    reference_point: tuple[int, int]
+    reference_value: float
+    sigma_cal: np.ndarray | None = None
+    sigma_fit: np.ndarray | None = None
+    n_eff: np.ndarray | None = None
+    coverage: np.ndarray | None = None
+    fit_residual_std: float | None = None
+    unwrap_decisions: Any = None
+    n_excluded_pixels: int = 0
+    passes: int = 1
+    extra: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def calibration(self) -> np.ndarray:
+        """The layer users subtract from DISP: the exact sum of the components.
+
+        One output array, accumulated in place in `COMPONENTS` order.
+        """
+        total = np.array(self.cal_gnss_surface, copy=True)
+        for name in COMPONENTS[1:]:
+            total += getattr(self, name)
+        return total
+
+    def assert_closed(self, atol: float = 1e-6) -> None:
+        """Check ``calibration == sum(components)`` (true by construction; tests)."""
+        total = sum(getattr(self, name) for name in COMPONENTS)
+        diff = np.nanmax(np.abs(self.calibration - total))
+        if not diff <= atol:
+            msg = f"calibration differs from the component sum by {diff:g}"
+            raise AssertionError(msg)
+
+    def components(self) -> dict[str, np.ndarray]:
+        """Return the component arrays by name."""
+        return {name: getattr(self, name) for name in COMPONENTS}
+
+
+def _check_shapes(disp: np.ndarray, **arrays: np.ndarray | None) -> None:
+    for name, arr in arrays.items():
+        if arr is not None and np.shape(arr) != disp.shape:
+            msg = f"{name} shape {np.shape(arr)} != disp shape {disp.shape}"
+            raise ValueError(msg)
+
+
+def _reference_offset(disp: np.ndarray, ref_point: tuple[int, int]) -> float:
+    refy, refx = ref_point
+    value = float(disp[refy, refx])
+    if not np.isfinite(value):
+        msg = (
+            f"Reference pixel {ref_point} has no valid displacement (value {value}); "
+            "choose a reference point valid in every epoch"
+        )
+        raise ValueError(msg)
+    return value
+
+
+def _downsample_bool(mask: np.ndarray, factor: int) -> np.ndarray:
+    """Downsample a mask: a block is valid when more than half of its pixels are."""
+    return downsample_array(mask.astype(np.float32), factor, method="mean") > 0.5
+
+
+def _upsample_nan(
+    arr: np.ndarray, shape: tuple[int, int], factor: int, dtype=np.float64
+) -> np.ndarray:
+    """Upsample a map that may hold NaN (nearest: each pixel takes its block's node).
+
+    `downsample_array` trims the frame to a multiple of `factor`, so the last
+    rows/columns of the full grid fall beyond the last block; they take the
+    nearest node rather than being cut off.
+    """
+    a = np.asarray(arr, dtype=dtype)  # cast the small map, not the full frame
+    if factor <= 1:
+        return a
+    rows = np.minimum(np.arange(shape[0]) // factor, a.shape[0] - 1)
+    cols = np.minimum(np.arange(shape[1]) // factor, a.shape[1] - 1)
+    return a[rows][:, cols]
+
+
+def _frame_cutoff_m(shape: tuple[int, int], pixel_m: float) -> float:
+    """Cutoff for the pass-1 tie: four frame widths, i.e. a near-planar fit."""
+    return 4.0 * max(shape) * pixel_m
+
+
+# The pass-1 tie is a near-planar fit, so it is computed on a grid of at most
+# this many pixels across and interpolated back: the Gaussian moments of a
+# 4-frame-wide kernel on a 1300 x 1600 fit grid cost minutes, on 130 x 160
+# they cost nothing, and the two agree to well below a millimetre.
+TIE_MAX_PX = 256
+
+
+def _extrapolate_sigma(
+    sigma: np.ndarray, scale_px: float, max_factor: float = 3.0
+) -> np.ndarray:
+    """Fill NaN cells of a sigma map from the nearest finite cell, inflated.
+
+    The factor grows with the distance d (pixels) to that cell as
+    ``1 + (max_factor - 1) * (1 - exp(-d / scale_px))``, the shape used inside
+    interpolated areas (`sigma_inflation_inside`): far from any fitted cell
+    the surface is an extrapolation and its sigma saturates at `max_factor`.
+    All-NaN input is returned unchanged.
+    """
+    from scipy.ndimage import distance_transform_edt
+
+    sigma = np.asarray(sigma)
+    missing = ~np.isfinite(sigma)
+    if not missing.any() or missing.all():
+        return sigma
+    d, (iy, ix) = distance_transform_edt(missing, return_indices=True)
+    nearest = sigma[iy, ix]
+    factor = 1.0 + (max_factor - 1.0) * (1.0 - np.exp(-d / scale_px))
+    return np.where(missing, nearest * factor, sigma).astype(sigma.dtype, copy=False)
+
+
+def _robust_plane(
+    rows: np.ndarray, cols: np.ndarray, misfit: np.ndarray, n_iter: int = 3
+) -> np.ndarray:
+    """Least-squares plane ``a + b*row + c*col`` with iterative 3-MAD trimming."""
+    a = np.column_stack([np.ones(rows.size), rows, cols]).astype(np.float64)
+    keep = np.ones(misfit.size, dtype=bool)
+    coef = np.zeros(3)
+    for _ in range(n_iter):
+        coef = np.linalg.lstsq(a[keep], misfit[keep], rcond=None)[0]
+        r = misfit - a @ coef
+        centre = np.median(r[keep])
+        mad = 1.4826 * np.median(np.abs(r[keep] - centre))
+        if mad == 0:
+            break
+        new_keep = np.abs(r - centre) <= 3.0 * mad
+        if new_keep.sum() < 3 or np.array_equal(new_keep, keep):
+            break
+        keep = new_keep
+    return coef
+
+
+def _region_offsets(
+    surface_ds: np.ndarray,
+    residual_ds: np.ndarray,
+    labels_ds: np.ndarray,
+    usable: np.ndarray,
+    min_pixels: int,
+    model: str = "offset",
+    plane_min_pixels: int = 1000,
+) -> np.ndarray:
+    """Add each non-mainland region's misfit model to the mainland surface there.
+
+    The mainland surface is extrapolated into the other regions by the gap
+    filling; each region with at least `min_pixels` usable pixels then gets
+    the median of ``residual - surface`` over them as a constant, so an
+    island's whole-cycle error (or any constant offset) is absorbed by the
+    island alone. With ``model="plane"`` a region with at least
+    `plane_min_pixels` usable pixels gets a robust plane instead, which also
+    absorbs the tilt the extrapolation leaves across a large island.
+    """
+    from ..unwrap.regions import largest_region
+
+    out = surface_ds.copy()
+    main = largest_region(labels_ds)
+    for lab in np.unique(labels_ds[(labels_ds > 0) & (labels_ds != main)]):
+        region = labels_ds == lab
+        use = region & usable & np.isfinite(residual_ds)
+        if use.sum() < min_pixels:
+            continue
+        misfit = residual_ds[use] - surface_ds[use]
+        if model == "plane" and use.sum() >= plane_min_pixels:
+            r_use, c_use = np.nonzero(use)
+            coef = _robust_plane(r_use, c_use, misfit)
+            r_all, c_all = np.nonzero(region)
+            out[r_all, c_all] += coef[0] + coef[1] * r_all + coef[2] * c_all
+            logger.debug(
+                "region %d: %d px, plane %.4f %+.2e/row %+.2e/col",
+                lab,
+                int(use.sum()),
+                *coef,
+            )
+            continue
+        offset = float(np.median(misfit))
+        out[region] += offset
+        logger.debug("region %d: %d px, offset %.4f", lab, int(use.sum()), offset)
+    return out
+
+
+def calibrate_pair(
+    disp: np.ndarray,
+    gnss_los: np.ndarray,
+    mask: np.ndarray,
+    ref_point: tuple[int, int],
+    options: CalibrationOptions,
+    pixel_m: float,
+    cycle_m: float,
+    *,
+    gnss_los_std: np.ndarray | None = None,
+    coherence: np.ndarray | None = None,
+    tropo: np.ndarray | None = None,
+    set_correction: np.ndarray | None = None,
+    exclude_mask: np.ndarray | None = None,
+    fit_mask: np.ndarray | None = None,
+    sigma_tropo: np.ndarray | float | None = None,
+    sigma_ref: float = 0.0,
+    unwrap_hook: UnwrapHook | None = None,
+    n_jobs: int = -1,
+    fit_lock: Any | None = None,
+    diagnostic_maps: bool = True,
+) -> CalibrationResult:
+    """Calibrate one pair; return the surface and every component.
+
+    Parameters
+    ----------
+    disp : np.ndarray
+        LOS displacement of the pair (NaN where invalid).
+    gnss_los : np.ndarray
+        GNSS LOS displacement for the same pair, same grid and units
+        (`venti.gnss.sampling.project_field_to_los` x the pair's span).
+    mask : np.ndarray
+        True = valid pixel (recommended mask AND water mask).
+    ref_point : (row, col)
+        Reference pixel; its displacement is removed and restored as
+        ``cal_reference_offset``.
+    options : CalibrationOptions
+        Algorithm options (schema v2). ``surface.method`` selects the path.
+    pixel_m : float
+        Posting of `disp` in meters (used by the loclin cutoff).
+    cycle_m : float
+        One unwrapping cycle in the units of `disp` (lambda/2 of LOS
+        displacement; `SensorSpec.cycle_m` when `disp` is in meters).
+    gnss_los_std, coherence : np.ndarray, optional
+        GNSS LOS sigma (the ``sigma_grid`` term of sigma_CAL, inflated by
+        ``uncertainty.k_grid``; gamma fit weights) and temporal coherence
+        (loclin weights, ``weights.coherence_power``).
+    tropo, set_correction : np.ndarray, optional
+        Corrections to remove before the fit; restored as ``cal_tropo`` and
+        ``cal_set``.
+    exclude_mask : np.ndarray, optional
+        Remove-restore mask (True = excluded from the fit).
+    fit_mask : np.ndarray, optional
+        Stable-pixel mask (True = may be fit). Required when
+        ``surface.fit_mask`` names a packaged one (`venti.frames.fit_mask_path`
+        locates the file); may also be given without a name, for a mask the
+        caller reads from its own input (e.g. a runconfig file). Pixels
+        outside it are left out of the loclin fit only.
+    sigma_tropo : np.ndarray or float, optional
+        Uncertainty of the tropospheric correction, same units as `disp`
+        (R-E1 term; 0 until a model exists).
+    sigma_ref : float
+        Uncertainty of the reference offset (R-E1 term), default 0. The
+        option ``uncertainty.sigma_nonsecular_meters`` (in the units of
+        `disp`, metres for DISP-S1) joins it in quadrature.
+    unwrap_hook : callable, optional
+        ``hook(residual, valid, cycle_m) -> (shift, decisions)``; used only
+        when ``options.unwrap_error_correction`` is True. With the loclin
+        method and ``surface.two_pass`` it runs on ``DISP - CAL1`` (the
+        pass-1 tie removed); otherwise on the referenced displacement. Either
+        way the input still carries the GNSS signal: the estimator subtracts
+        the GNSS field itself (`venti.unwrap.cycles.estimate_cycles`).
+    n_jobs, fit_lock
+        Passed to the gamma windowed fit.
+    diagnostic_maps : bool
+        Keep the full-resolution loclin diagnostics (``coverage``,
+        ``sigma_fit``, ``n_eff``) in the result. A product writer that only
+        needs the calibration and ``sigma_cal`` passes False: each map is one
+        full frame (~0.3 GB in float32 on a DISP-S1 frame).
+
+    """
+    disp = np.asarray(disp)
+    if disp.dtype not in (np.float32, np.float64):
+        disp = disp.astype(np.promote_types(disp.dtype, np.float32))
+    _check_shapes(
+        disp,
+        gnss_los=gnss_los,
+        mask=mask,
+        gnss_los_std=gnss_los_std,
+        coherence=coherence,
+        tropo=tropo,
+        set_correction=set_correction,
+        exclude_mask=exclude_mask,
+        fit_mask=fit_mask,
+        sigma_tropo=sigma_tropo if np.ndim(sigma_tropo) > 0 else None,
+    )
+    if options.surface.fit_mask is not None and fit_mask is None:
+        msg = (
+            f"surface.fit_mask is {options.surface.fit_mask!r} but fit_mask was"
+            " not given"
+        )
+        raise ValueError(msg)
+    # one read-only zero layer shared by every component that is not applied
+    # (a broadcast view: no full frame at all)
+    zeros = np.broadcast_to(np.zeros((), dtype=disp.dtype), disp.shape)
+    applied = {
+        "cal_gnss_surface": True,
+        "cal_reference_offset": True,
+        "cal_tropo": tropo is not None,
+        "cal_set": set_correction is not None,
+        "cal_unwrap_shift": False,
+    }
+    cal_tropo = np.asarray(tropo, dtype=disp.dtype) if tropo is not None else zeros
+    cal_set = (
+        np.asarray(set_correction, dtype=disp.dtype)
+        if set_correction is not None
+        else zeros
+    )
+
+    # 1. corrections off, reference off: the field the fit works on. One
+    # allocation, then in place, in the order ((disp - tropo) - set) - ref.
+    work = np.subtract(disp, cal_tropo, dtype=disp.dtype)
+    if set_correction is not None:
+        work -= cal_set
+    ref_value = _reference_offset(work, ref_point)
+    work -= np.asarray(ref_value, dtype=work.dtype)
+    mask = np.asarray(mask, dtype=bool)
+    valid = mask & np.isfinite(work) & np.isfinite(np.asarray(gnss_los))
+    exclude = (
+        np.asarray(exclude_mask, dtype=bool)
+        if exclude_mask is not None
+        else np.zeros(disp.shape, dtype=bool)
+    )
+    # keep the caller's float dtype (float32 from cal-disp): a float64 copy of a
+    # full frame costs ~0.6 GB and the gamma estimator always received float32
+    gnss = np.asarray(np.ma.filled(gnss_los, np.nan))
+    if gnss.dtype not in (np.float32, np.float64):
+        gnss = gnss.astype(np.float64)
+    cal_unwrap_shift = zeros
+    decisions = None
+
+    method = options.surface.method
+    if method == "windowed_plane":
+        # ---- gamma path, reproduced through the gamma estimator -------------
+        from ..surface import estimate_calibration_surface
+
+        if options.unwrap_error_correction:
+            # gamma shifted the referenced field in place and lost the shift;
+            # do the same step here and keep it as a component
+            from ..unwrap import correct_region_offset
+
+            shifted = correct_region_offset(
+                input_disp=np.where(valid, work, np.nan),
+                mask=valid,
+                cycle_length=cycle_m,
+                min_region_area=options.unwrap.min_region_area,
+            )
+            shifted = np.ma.filled(shifted, np.nan)
+            shift = np.where(
+                np.isfinite(shifted) & np.isfinite(work), work - shifted, 0.0
+            )
+            cal_unwrap_shift = shift.astype(disp.dtype)
+            applied["cal_unwrap_shift"] = bool(np.any(cal_unwrap_shift != 0))
+            work -= cal_unwrap_shift
+        gamma_opts = options.model_copy(update={"unwrap_error_correction": False})
+        window_px = max(1, round(options.window_size_meters / pixel_m))
+        event_mask = ~exclude if exclude.any() else None
+        # the estimator removes and restores the offset itself; `work` is not
+        # used after this call, so the offset goes back in place
+        work += np.asarray(ref_value, dtype=work.dtype)
+        gamma = estimate_calibration_surface(
+            work,
+            gnss,
+            valid,
+            ref_point,
+            window_px,
+            gnss_los_std=(
+                gnss_los_std if options.weight_fit_by_gnss_uncertainty else None
+            ),
+            event_mask=event_mask,
+            options=gamma_opts,
+            wavelength_m=2.0 * cycle_m,
+            downsample_factor=options.downsample_factor,
+            downsample_method=options.downsample_method,
+            downsample_weights=coherence if options.downsample_weighted else None,
+            n_jobs=n_jobs,
+            fit_lock=fit_lock,
+        )
+        surface = np.asarray(gamma.surface, dtype=disp.dtype) - ref_value
+        coverage = None
+        passes = 1
+        fit_std = None
+        sigma = sigma_fit_map = n_eff = None  # gamma: cal-disp keeps its RBF sigma
+    elif method == "loclin":
+        # ---- v0.5 path ---------------------------------------------------------
+        factor = max(1, int(options.downsample_factor))
+        pixel_ds = pixel_m * factor
+
+        def down(arr: np.ndarray) -> np.ndarray:
+            return (
+                downsample_array(arr, factor, method=options.downsample_method)
+                if factor > 1
+                else np.asarray(arr, float)
+            )
+
+        valid_ds = _downsample_bool(valid, factor) if factor > 1 else valid
+        # unstable pixels (surface.fit_mask) leave the fit only: the surface is
+        # still evaluated there and sigma_CAL is not inflated, so they join the
+        # fit-grid exclusion but not `exclude`
+        fit_exclude = exclude
+        if fit_mask is not None:
+            fit_exclude = exclude | (~np.asarray(fit_mask, dtype=bool) & valid)
+        exclude_ds = (
+            _downsample_bool(fit_exclude, factor) if factor > 1 else fit_exclude
+        )
+        # island offsets are constants: estimate them on every valid pixel of
+        # the region (outside deforming areas), not only the stable ones
+        area_ds = _downsample_bool(exclude, factor) if factor > 1 else exclude
+        coh_ds = (
+            down(np.nan_to_num(coherence, nan=0.0)) if coherence is not None else None
+        )
+        gnss_ds = down(np.where(np.isfinite(gnss), gnss, 0.0))
+
+        def fit(
+            residual_ds: np.ndarray,
+            cutoff_m: float,
+            robust: bool,
+            *,
+            grids: (
+                tuple[np.ndarray, np.ndarray, np.ndarray | None, float] | None
+            ) = None,
+        ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+            f_valid, f_exclude, f_coh, f_pixel = grids or (
+                valid_ds,
+                exclude_ds,
+                coh_ds,
+                pixel_ds,
+            )
+            fit_valid = f_valid & ~f_exclude & np.isfinite(residual_ds)
+            if not fit_valid.any():
+                msg = "no valid pixel left for the fit after masking and exclusion"
+                raise ValueError(msg)
+            filled, filled_mask = fill_gaps(
+                np.where(fit_valid, residual_ds, np.nan), fit_valid
+            )
+            w = base_weights(
+                fit_valid, filled_mask, options.weights.filled_pixel_weight
+            )
+            sigma_px = kernel_sigma_px(cutoff_m, f_pixel)
+            w = fit_weights(
+                filled,
+                w,
+                sigma_px,
+                coherence=f_coh,
+                coherence_power=options.weights.coherence_power,
+                robust=robust,
+            )
+            surface_ds, cov = loclin_surface(filled, w, f_pixel, cutoff_m)
+            return surface_ds, cov, w, filled
+
+        def tie(residual_ds: np.ndarray) -> np.ndarray:
+            """Pass-1 robust tie; coarse grid when the fit grid is large."""
+            tie_factor = max(1, int(np.ceil(max(residual_ds.shape) / TIE_MAX_PX)))
+            cutoff = _frame_cutoff_m(residual_ds.shape, pixel_ds)
+            if tie_factor == 1:
+                return fit(residual_ds, cutoff, robust=True)[0]
+            fit_valid = valid_ds & ~exclude_ds & np.isfinite(residual_ds)
+            coarse = downsample_array(
+                np.where(fit_valid, residual_ds, np.nan), tie_factor, method="mean"
+            )
+            grids = (
+                np.isfinite(coarse),
+                np.zeros(coarse.shape, dtype=bool),
+                downsample_array(coh_ds, tie_factor) if coh_ds is not None else None,
+                pixel_ds * tie_factor,
+            )
+            tie_coarse = fit(coarse, cutoff, robust=True, grids=grids)[0]
+            return upsample_array(tie_coarse, residual_ds.shape)
+
+        work_ds = down(np.where(valid, work, 0.0))
+        residual_ds = work_ds - gnss_ds
+        passes = 1
+        if options.surface.two_pass:
+            passes = 2
+            tie_ds = tie(residual_ds)
+            if options.unwrap_error_correction and unwrap_hook is not None:
+                # the estimator measures DISP - CAL1, which still carries the
+                # GNSS signal; it removes the GNSS field itself for the veto
+                shift_ds, decisions = unwrap_hook(
+                    work_ds - tie_ds, valid_ds & ~exclude_ds, cycle_m
+                )
+                shift_ds = np.asarray(shift_ds, dtype=np.float64)
+                if shift_ds.shape != residual_ds.shape:
+                    msg = (
+                        f"unwrap hook returned shape {shift_ds.shape}, expected"
+                        f" {residual_ds.shape}"
+                    )
+                    raise ValueError(msg)
+                if np.any(shift_ds != 0):
+                    # the fit grid is trimmed to a multiple of `factor`: the
+                    # trailing rows/columns take their nearest block
+                    shift_full = _upsample_nan(shift_ds, disp.shape, factor)
+                    cal_unwrap_shift = np.where(
+                        np.isfinite(work), shift_full, 0.0
+                    ).astype(disp.dtype)
+                    applied["cal_unwrap_shift"] = True
+                    work -= cal_unwrap_shift
+                    residual_ds = residual_ds - shift_ds
+        elif options.unwrap_error_correction and unwrap_hook is not None:
+            shift_ds, decisions = unwrap_hook(work_ds, valid_ds & ~exclude_ds, cycle_m)
+            shift_ds = np.asarray(shift_ds, dtype=np.float64)
+            if np.any(shift_ds != 0):
+                shift_full = _upsample_nan(shift_ds, disp.shape, factor)
+                cal_unwrap_shift = np.where(np.isfinite(work), shift_full, 0.0).astype(
+                    disp.dtype
+                )
+                applied["cal_unwrap_shift"] = True
+                work -= cal_unwrap_shift
+                residual_ds = residual_ds - shift_ds
+
+        region_grids = None
+        labels_ds = None
+        if options.surface.regions == "separate":
+            from ..unwrap.regions import largest_region, segment_regions
+
+            # deforming areas are land: they must not cut a region in two
+            labels_ds = segment_regions(
+                valid_ds | exclude_ds,
+                erosion_iterations=1,
+                min_region_area=options.surface.region_min_pixels,
+            )
+            main = largest_region(labels_ds)
+            others = (labels_ds > 0) & (labels_ds != main)
+            region_grids = (valid_ds, exclude_ds | others, coh_ds, pixel_ds)
+        surface_ds, coverage_ds, w_ds, filled_ds = fit(
+            residual_ds,
+            options.surface.cutoff_wavelength_meters,
+            options.weights.robust,
+            grids=region_grids,
+        )
+        if labels_ds is not None:
+            surface_ds = _region_offsets(
+                surface_ds,
+                residual_ds,
+                labels_ds,
+                valid_ds & ~area_ds,
+                options.surface.region_min_pixels,
+                model=options.surface.region_model,
+                plane_min_pixels=options.surface.region_plane_min_pixels,
+            )
+        fit_ok = (w_ds > 0) & valid_ds & ~exclude_ds
+        fit_std = (
+            float(
+                np.sqrt(
+                    np.average(
+                        (residual_ds - surface_ds)[fit_ok] ** 2, weights=w_ds[fit_ok]
+                    )
+                )
+            )
+            if fit_ok.any()
+            else None
+        )
+        # upsample from the displacement's precision: each full-frame float64
+        # map would cost ~0.6 GB on a DISP-S1 frame
+        surface = (
+            upsample_array(surface_ds.astype(disp.dtype), disp.shape)
+            if factor > 1
+            else surface_ds
+        )
+        coverage = (
+            None
+            if not diagnostic_maps
+            else (
+                upsample_array(coverage_ds.astype(disp.dtype), disp.shape)
+                if factor > 1
+                else coverage_ds
+            )
+        )
+        surface = np.asarray(surface, dtype=disp.dtype)
+
+        # sigma_CAL (R-E1): fit term on the fit grid, grid term at full
+        # resolution, inflation inside the interpolated areas
+        sigma_px_final = kernel_sigma_px(
+            options.surface.cutoff_wavelength_meters, pixel_ds
+        )
+        sigma_fit_ds, n_eff_ds = fit_sigma(filled_ds, w_ds, sigma_px_final, surface_ds)
+        if options.uncertainty.extrapolate_sigma:
+            sigma_fit_ds = _extrapolate_sigma(sigma_fit_ds, sigma_px_final)
+        sigma_fit_map = _upsample_nan(sigma_fit_ds, disp.shape, factor, disp.dtype)
+        n_eff = (
+            _upsample_nan(n_eff_ds, disp.shape, factor, disp.dtype)
+            if diagnostic_maps
+            else None
+        )
+        k = resolve_k(options.uncertainty)
+        if gnss_los_std is None:
+            logger.warning("no gnss_los_std given: sigma_cal carries the fit term only")
+        inflation = None
+        if options.uncertainty.inflate_inside_areas and exclude.any():
+            inflation = sigma_inflation_inside(
+                exclude,
+                kernel_sigma_px(options.surface.cutoff_wavelength_meters, pixel_m),
+            ).astype(disp.dtype)
+        grid_term = None if gnss_los_std is None else np.ma.filled(gnss_los_std, np.nan)
+        if (
+            options.uncertainty.extrapolate_sigma
+            and grid_term is not None
+            and np.isnan(grid_term).any()
+        ):
+            # the grid sigma has no value beyond the LOS raster, where the
+            # surface still has one: nearest value from the fit grid (cheap)
+            coarse = _extrapolate_sigma(
+                np.asarray(grid_term[::factor, ::factor], dtype=np.float64),
+                1.0,
+                max_factor=1.0,
+            )
+            grid_term = np.where(
+                np.isnan(grid_term),
+                _upsample_nan(coarse, disp.shape, factor, disp.dtype),
+                grid_term,
+            )
+        sigma = sigma_cal(
+            grid_term,
+            sigma_fit_map,
+            k,
+            sigma_tropo=sigma_tropo,
+            # the optional non-secular station term joins sigma_ref in quadrature
+            sigma_ref=float(
+                np.hypot(sigma_ref, options.uncertainty.sigma_nonsecular_meters)
+            ),
+            inflation=inflation,
+        ).astype(disp.dtype, copy=False)
+        if options.uncertainty.extrapolate_sigma:
+            # sigma follows the calibration: NaN only where it is NaN (the fit
+            # term is extrapolated on the fit grid above)
+            no_cal = ~np.isfinite(surface)
+            for component in (cal_tropo, cal_set):
+                no_cal |= ~np.isfinite(component)
+            sigma[no_cal] = np.nan
+        else:
+            sigma[~(valid | exclude)] = np.nan
+        # log only: the fit-grid map, not a full-frame copy (nanmedian copies)
+        fit_term_median = float(np.nanmedian(sigma_fit_ds))
+        if not diagnostic_maps:
+            sigma_fit_map = None
+    else:  # pragma: no cover - Literal in the schema prevents it
+        msg = f"unknown surface method {method!r}"
+        raise ValueError(msg)
+
+    result = CalibrationResult(
+        cal_gnss_surface=surface,
+        # one constant: a read-only view, not a full frame
+        cal_reference_offset=np.broadcast_to(
+            np.asarray(ref_value, dtype=disp.dtype), disp.shape
+        ),
+        cal_tropo=cal_tropo,
+        cal_set=cal_set,
+        cal_unwrap_shift=cal_unwrap_shift,
+        components_applied=applied,
+        method=method,
+        reference_point=(int(ref_point[0]), int(ref_point[1])),
+        reference_value=ref_value,
+        sigma_cal=sigma,
+        sigma_fit=sigma_fit_map,
+        n_eff=n_eff,
+        coverage=coverage,
+        fit_residual_std=fit_std,
+        unwrap_decisions=decisions,
+        n_excluded_pixels=int(exclude.sum()),
+        passes=passes,
+    )
+    logger.info(
+        "calibrate_pair(%s, %d pass%s): components %s; fit residual std %s",
+        method,
+        passes,
+        "es" if passes > 1 else "",
+        {k: v for k, v in applied.items() if v},
+        f"{fit_std:.4g}" if fit_std is not None else "n/a",
+    )
+    if sigma is not None:
+        logger.info(
+            "sigma_cal median %.4g (k = %.2f, fit term median %.4g)",
+            float(np.nanmedian(sigma[::8, ::8])),  # log only: a sample
+            resolve_k(options.uncertainty),
+            fit_term_median,
+        )
+    return result

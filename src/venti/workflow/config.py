@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025-2026 opera-adt
+# SPDX-License-Identifier: BSD-3-Clause
+# Part of Venti, https://github.com/opera-adt/Venti (BSD-3-Clause, see LICENSE).
 """Configuration handling for Venti workflows.
 
 This module provides configuration management split into two files:
@@ -7,15 +10,21 @@ This module provides configuration management split into two files:
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any, Literal
 
 import yaml  # type: ignore[import-untyped]
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # ============================================================================
 # Algorithm Parameters (algorithm_parameters.yaml)
 # ============================================================================
+
+
+# Schema version of algorithm_parameters.yaml written by this Venti (plan T19).
+ALGORITHM_SCHEMA_VERSION = 2
+logger = logging.getLogger(__name__)
 
 
 class ProcessingOptions(BaseModel):
@@ -72,6 +81,346 @@ class SavitzkyGolayOptions(BaseModel):
         51, ge=3, description="Window length in pixels (must be odd)"
     )
     polyorder: int = Field(3, ge=0, description="Polynomial order for fitting")
+
+
+class SurfaceOptions(BaseModel):
+    """Calibration-surface estimator (PRD R-S1..R-S3).
+
+    Defaults reproduce the gamma 0.3 algorithm: one windowed plane fit, no gap
+    filling, single pass. The trade-study algorithm is ``method='loclin'``
+    with ``cutoff_wavelength_meters=50000``, ``fill_gaps=True``,
+    ``two_pass=True`` (plan T29-T33).
+    """
+
+    method: Literal["windowed_plane", "loclin"] = Field(
+        "windowed_plane",
+        description=(
+            "'windowed_plane': the gamma moving-window plane fit sized by "
+            "window_size_meters; 'loclin': local-linear kernel with a physical "
+            "half-response cutoff (cutoff_wavelength_meters)"
+        ),
+    )
+    cutoff_wavelength_meters: float = Field(
+        50000.0,
+        gt=0,
+        description=(
+            "Half-response wavelength of the 'loclin' kernel in meters: signal "
+            "longer than this is attributed to GNSS, shorter stays InSAR"
+        ),
+    )
+    fill_gaps: bool = Field(
+        False,
+        description=(
+            "Fill masked/water cells before the fit so the surface is continuous "
+            "everywhere and never 0 on masked cells (R-S3)"
+        ),
+    )
+    two_pass: bool = Field(
+        False,
+        description=(
+            "Robust frame-wide tie first, unwrap correction on DISP - CAL1, then "
+            "the final surface (R-S1)"
+        ),
+    )
+    regions: Literal["none", "separate"] = Field(
+        "none",
+        description=(
+            "'loclin' only. 'separate': fit the final surface on the largest "
+            "connected land region (the mainland) and give each other region "
+            "(island, cut-off peninsula) its own constant offset, so a region's "
+            "unwrapping cycle jump cannot bend the mainland surface across a water "
+            "gap (T62, Houston/Galveston). 'none': one surface for every region."
+        ),
+    )
+    region_min_pixels: int = Field(
+        50,
+        ge=1,
+        description=(
+            "With regions='separate': regions smaller than this many fit-grid "
+            "pixels keep the mainland surface instead of an offset of their own."
+        ),
+    )
+    region_model: Literal["offset", "plane"] = Field(
+        "offset",
+        description=(
+            "With regions='separate': what each non-mainland region adds to the "
+            "mainland surface extrapolated into it. 'offset': one constant (the "
+            "median misfit). 'plane': offset + east/north tilt, robustly fitted to "
+            "the misfit, for regions of at least `region_plane_min_pixels` (smaller "
+            "ones keep the offset). The extrapolated mainland surface can tilt "
+            "across a large island far offshore (T62 edge pass, Catalina in F16940)."
+        ),
+    )
+    region_plane_min_pixels: int = Field(
+        1000,
+        ge=3,
+        description=(
+            "With region_model='plane': usable fit-grid pixels a region needs for a "
+            "plane (1000 at the 180 m v0.5 fit grid is ~32 km^2)."
+        ),
+    )
+    fit_mask: str | None = Field(
+        None,
+        description=(
+            "'loclin' only. Name of a stable-pixel mask packaged in "
+            "venti/data/fit_masks (uint8 GeoTIFF on the frame's DISP grid, 1 = "
+            "stable; built with venti-fit-mask). Pixels outside it are left out "
+            "of the fit like a remove-restore area: the surface is still "
+            "evaluated there and sigma_CAL is not inflated (T62, Houston/"
+            "Matagorda). With regions='separate' the island offsets still use "
+            "every valid island pixel. The caller reads it onto the pair's grid "
+            "and passes "
+            "calibrate_pair(fit_mask=...). None: every valid pixel is fit, unless "
+            "the caller passes a mask of its own (a file from its runconfig)."
+        ),
+    )
+
+    model_config = {"validate_assignment": True, "extra": "forbid"}
+
+
+class WeightOptions(BaseModel):
+    """Fit weights (PRD R-S4). Defaults: unweighted, as in gamma."""
+
+    coherence_power: float = Field(
+        0.0,
+        ge=0,
+        description=(
+            "Weight pixels by temporal_coherence ** p; 0 disables. The trade "
+            "studies recommend 8 (TS-B1 may revise)"
+        ),
+    )
+    robust: bool = Field(
+        False,
+        description="Local robust (Huber/MAD) re-weighting inside the kernel fit",
+    )
+    filled_pixel_weight: float = Field(
+        0.02,
+        ge=0,
+        le=1,
+        description="Weight given to gap-filled pixels when fill_gaps is on",
+    )
+
+    model_config = {"validate_assignment": True, "extra": "forbid"}
+
+
+class TropoOptions(BaseModel):
+    """Tropospheric correction mode (PRD R-T1).
+
+    ``'legacy'`` keeps the gamma behaviour: `apply_tropo_correction` decides,
+    the full ZTD is removed. ``'auto'`` chooses from the DEM relief
+    (p5-p95): off below `relief_off_meters`, stratified at or above
+    `relief_stratified_meters`, off in between until trade study TS-T1.
+    """
+
+    mode: Literal["legacy", "off", "stratified", "full", "auto"] = Field(
+        "legacy", description="Tropo mode; 'legacy' defers to apply_tropo_correction"
+    )
+    relief_off_meters: float = Field(
+        300.0, ge=0, description="'auto': below this relief the correction is off"
+    )
+    relief_stratified_meters: float = Field(
+        1500.0,
+        ge=0,
+        description="'auto': at or above this relief the stratified model is used",
+    )
+
+    model_config = {"validate_assignment": True, "extra": "forbid"}
+
+    @model_validator(mode="after")
+    def _bands_ordered(self) -> TropoOptions:
+        if self.relief_off_meters > self.relief_stratified_meters:
+            msg = (
+                "relief_off_meters must not exceed relief_stratified_meters "
+                f"({self.relief_off_meters} > {self.relief_stratified_meters})"
+            )
+            raise ValueError(msg)
+        return self
+
+
+class GnssOptions(BaseModel):
+    """GNSS grid handling (PRD R-G1, R-G2, R-G4, R-G5). Defaults as in gamma."""
+
+    buffer_meters: float = Field(
+        0.0,
+        ge=0,
+        description=(
+            "Use grid nodes this far outside the frame (R-G2; v0.5 uses 50000). "
+            "sample_gnss_enu interpolates E/N/U and projects per pixel, so nodes "
+            "outside the swath need no LOS look"
+        ),
+    )
+    exclude_defo_nodes: bool = Field(
+        False,
+        description="Drop grid nodes inside the defo/event areas (R-G5)",
+    )
+    reinterpolate_excluded: bool = Field(
+        False,
+        description=(
+            "Re-estimate the excluded nodes from the surrounding ones with GPS "
+            "Imaging (venti.gnss.sampling.reinterpolate_nodes)"
+        ),
+    )
+    reprocessing: bool = Field(
+        False,
+        description=(
+            "Reprocessing mode: the only mode in which grid_type='variable' is "
+            "allowed (R-G1)"
+        ),
+    )
+    snapshot_id: str | None = Field(
+        None,
+        description=(
+            "Identifier of the frozen UNR grid snapshot in use (R-G4); recorded "
+            "in the product metadata"
+        ),
+    )
+
+    model_config = {"validate_assignment": True, "extra": "forbid"}
+
+
+class UncertaintyOptions(BaseModel):
+    """calibration_std model (PRD R-E1, R-E2)."""
+
+    k_grid: float | Literal["frame_table"] = Field(
+        1.0,
+        description=(
+            "Inflation of the GNSS grid sigma: a number, or 'frame_table' to "
+            "take the per-frame value from the frame-parameter table (TS-G1)"
+        ),
+    )
+    inflate_inside_areas: bool = Field(
+        True,
+        description="Grow sigma with distance inside interpolated defo/event areas",
+    )
+    extrapolate_sigma: bool = Field(
+        False,
+        description=(
+            "'loclin' only. Give sigma_CAL wherever the calibration has a value: "
+            "where the kernel has too little weight for a fit term, take the "
+            "nearest fitted value and grow it with the distance (up to 3x at a "
+            "few kernel sigmas, as inside interpolated areas). False: NaN outside "
+            "the fitted, valid pixels (v0.5 before 2026-10-14)."
+        ),
+    )
+    sigma_nonsecular_meters: float = Field(
+        0.0,
+        ge=0,
+        description=(
+            "Optional per-pair term for non-secular station motion (seasonal "
+            "loading etc.) that a constant-velocity grid cannot carry; added in "
+            "quadrature to sigma_CAL. 0 (default): sigma_CAL is the uncertainty of "
+            "the calibration surface only. TS-G1 measured 2.6-4.9 mm on the four "
+            "validation frames. Units of the displacement (metres); loclin route"
+        ),
+    )
+    sigma_disp_placeholder_mm: float = Field(
+        10.0,
+        ge=0,
+        description=(
+            "Documented DISP noise below the cutoff that users add themselves; "
+            "replaced by the TS-S1 model"
+        ),
+    )
+
+    model_config = {"validate_assignment": True, "extra": "forbid"}
+
+
+class FrameOptions(BaseModel):
+    """Frame-level facts that are not algorithm tuning (PRD §4.3, D3).
+
+    Filled from the frame-parameter table (`venti.frames`); recorded in the
+    product metadata.
+    """
+
+    plate: str = Field(
+        "NA",
+        description=(
+            "Tectonic plate of the plate_motion layer: a UNR two-letter code "
+            "(NA, PA, CA, ...) or an ITRF PMM name (NOAM, PCFC, CARB, ...)"
+        ),
+    )
+    name: str | None = Field(None, description="Human-readable frame name")
+    benchmark_category: str | None = Field(
+        None, description="CalVal benchmark category of the frame (PRD 2.7), if any"
+    )
+
+    @field_validator("plate")
+    @classmethod
+    def _known_plate(cls, value: str) -> str:
+        from venti.models.plate_motion import PLATE_CODES, load_plate_motion_model
+
+        code = value.upper()
+        if code in PLATE_CODES or code in load_plate_motion_model():
+            return code
+        msg = (
+            f"Unknown plate {value!r}; codes: {sorted(PLATE_CODES)}, "
+            f"names: {sorted(load_plate_motion_model())}"
+        )
+        raise ValueError(msg)
+
+    model_config = {"validate_assignment": True, "extra": "forbid"}
+
+
+class UnwrapOptions(BaseModel):
+    """Unwrap-error correction details (PRD R-U1).
+
+    `CalibrationOptions.unwrap_error_correction` is the on/off switch.
+    """
+
+    region_source: Literal["mask", "water_mask"] = Field(
+        "water_mask",
+        description=(
+            "How regions are segmented: 'water_mask' watershed (islands, cut-off "
+            "peninsulas) or the gamma 'mask' islands"
+        ),
+    )
+    whole_cycles_only: bool = Field(
+        True, description="Only integer multiples of the cycle (lambda/2) are applied"
+    )
+    free_offsets: bool = Field(
+        False,
+        description=(
+            "Also allow non-integer offsets >= 0.3 cycle (removes real island "
+            "motion too; not for v0.5)"
+        ),
+    )
+    gnss_veto: bool = Field(
+        True, description="A shift must agree in sign with the GNSS residual direction"
+    )
+    min_region_area: int = Field(20, gt=0, description="Minimum region size in pixels")
+    anchor_distance_meters: float = Field(
+        12_000.0,
+        gt=0,
+        description=(
+            "A region is measured against anchored coherent land within this "
+            "distance of it (edge medians on both sides)"
+        ),
+    )
+    cycle_tolerance: float = Field(
+        0.15,
+        gt=0,
+        lt=0.5,
+        description="|jump - round(jump)| must be below this (cycles) to shift",
+    )
+    min_coherent_area_km2: float = Field(
+        0.9,
+        gt=0,
+        description="Regions with less coherent area than this are not measured",
+    )
+    min_edge_area_km2: float = Field(
+        0.18,
+        gt=0,
+        description="Minimum coherent area on each side of the water for a jump",
+    )
+    residual_gate_cycles: float | None = Field(
+        None,
+        description=(
+            "If set, only regions whose median timeseries_inversion_residuals "
+            "exceed this (cycles) may be shifted; necessary, not sufficient"
+        ),
+    )
+
+    model_config = {"validate_assignment": True, "extra": "forbid"}
 
 
 class CalibrationOptions(BaseModel):
@@ -142,7 +491,11 @@ class CalibrationOptions(BaseModel):
         "IGS20", description="GNSS reference frame (IGS14 or IGS20)"
     )
     unwrap_error_correction: bool = Field(
-        True, description="Correct unwrapping-error islands by whole-cycle offsets"
+        False,
+        description=(
+            "Correct unwrapping-error islands by whole-cycle offsets. Off until "
+            "trade study TS-U1 passes (PRD R-U1); details in `unwrap`"
+        ),
     )
     apply_tropo_correction: bool = Field(
         True,
@@ -163,6 +516,15 @@ class CalibrationOptions(BaseModel):
     )
     posting_meters: float = Field(
         30.0, gt=0, description="Input pixel spacing in meters"
+    )
+    downsample_factor: int = Field(
+        1, ge=1, description="Block-average the inputs by this factor before the fit"
+    )
+    downsample_method: Literal["mean", "median"] = Field(
+        "mean", description="Reducer used when downsampling"
+    )
+    downsample_weighted: bool = Field(
+        False, description="Weight the block average by the GNSS LOS uncertainty"
     )
     event_mask_buffer_pixels: int = Field(
         0,
@@ -230,6 +592,37 @@ class CalibrationOptions(BaseModel):
         default_factory=SavitzkyGolayOptions,
         description="Savitzky-Golay filter parameters",
     )
+    # Schema v2 (plan T19): the trade-study algorithm, all defaulting to the
+    # gamma behaviour so a v1 file loads unchanged.
+    surface: SurfaceOptions = Field(
+        default_factory=SurfaceOptions, description="Surface estimator (R-S1..R-S3)"
+    )
+    weights: WeightOptions = Field(
+        default_factory=WeightOptions, description="Fit weights (R-S4)"
+    )
+    tropo: TropoOptions = Field(
+        default_factory=TropoOptions, description="Tropospheric correction mode (R-T1)"
+    )
+    gnss: GnssOptions = Field(
+        default_factory=GnssOptions, description="GNSS grid handling (R-G1..R-G5)"
+    )
+    uncertainty: UncertaintyOptions = Field(
+        default_factory=UncertaintyOptions, description="calibration_std model (R-E1)"
+    )
+    unwrap: UnwrapOptions = Field(
+        default_factory=UnwrapOptions,
+        description="Unwrap-error correction details (R-U1)",
+    )
+    frame: FrameOptions = Field(
+        default_factory=FrameOptions,
+        description=(
+            "Frame-level facts from the frame-parameter table (plate, category)"
+        ),
+    )
+
+    # A typo in a cal-disp algorithm_parameters.yaml must fail loudly, not be
+    # ignored (plan T19; previously extra keys were dropped silently).
+    model_config = {"validate_assignment": True, "extra": "forbid"}
 
 
 class DecompositionOptions(BaseModel):
@@ -319,6 +712,14 @@ class AlgorithmParameters(BaseModel):
     between runs. These are saved in algorithm_parameters.yaml.
     """
 
+    schema_version: Literal[1, 2] = Field(
+        ALGORITHM_SCHEMA_VERSION,
+        description=(
+            "Version of this file's schema. 1 = gamma 0.3 (no nested option "
+            "groups); 2 adds surface/weights/tropo/gnss/uncertainty/unwrap. A "
+            "file without the key is treated as version 1 and upgraded in memory"
+        ),
+    )
     processing_options: ProcessingOptions = Field(
         default_factory=ProcessingOptions,
         description="Common processing settings used by multiple workflows",
@@ -349,8 +750,33 @@ class AlgorithmParameters(BaseModel):
             raise FileNotFoundError(msg)
 
         with open(yaml_path) as f:
-            data = yaml.safe_load(f)
+            data = yaml.safe_load(f) or {}
 
+        return cls.from_dict(data)
+
+    @classmethod
+    def from_dict(cls, data: dict) -> AlgorithmParameters:
+        """Build from a parsed YAML mapping, upgrading version-1 files in memory.
+
+        A version-1 file (gamma 0.3) has no ``schema_version`` and none of the
+        nested option groups; every new field takes the default that reproduces
+        the gamma behaviour, so the upgrade changes no result.
+        """
+        data = dict(data)
+        version = data.setdefault("schema_version", 1)
+        if version not in (1, ALGORITHM_SCHEMA_VERSION):
+            msg = (
+                f"algorithm_parameters schema_version {version!r} is not supported; "
+                f"this Venti reads versions 1 and {ALGORITHM_SCHEMA_VERSION}"
+            )
+            raise ValueError(msg)
+        if version == 1:
+            logger.info(
+                "algorithm_parameters has schema_version 1 (gamma 0.3); "
+                "upgrading to %d in memory with gamma-equivalent defaults",
+                ALGORITHM_SCHEMA_VERSION,
+            )
+            data["schema_version"] = ALGORITHM_SCHEMA_VERSION
         return cls(**data)
 
     def to_yaml(self, yaml_path: str | Path) -> None:
