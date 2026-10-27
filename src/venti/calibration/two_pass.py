@@ -190,20 +190,45 @@ def _extrapolate_sigma(
     return np.where(missing, nearest * factor, sigma).astype(sigma.dtype, copy=False)
 
 
+def _robust_plane(
+    rows: np.ndarray, cols: np.ndarray, misfit: np.ndarray, n_iter: int = 3
+) -> np.ndarray:
+    """Least-squares plane ``a + b*row + c*col`` with iterative 3-MAD trimming."""
+    a = np.column_stack([np.ones(rows.size), rows, cols]).astype(np.float64)
+    keep = np.ones(misfit.size, dtype=bool)
+    coef = np.zeros(3)
+    for _ in range(n_iter):
+        coef = np.linalg.lstsq(a[keep], misfit[keep], rcond=None)[0]
+        r = misfit - a @ coef
+        centre = np.median(r[keep])
+        mad = 1.4826 * np.median(np.abs(r[keep] - centre))
+        if mad == 0:
+            break
+        new_keep = np.abs(r - centre) <= 3.0 * mad
+        if new_keep.sum() < 3 or np.array_equal(new_keep, keep):
+            break
+        keep = new_keep
+    return coef
+
+
 def _region_offsets(
     surface_ds: np.ndarray,
     residual_ds: np.ndarray,
     labels_ds: np.ndarray,
     usable: np.ndarray,
     min_pixels: int,
+    model: str = "offset",
+    plane_min_pixels: int = 1000,
 ) -> np.ndarray:
-    """Add each non-mainland region's median misfit to the mainland surface there.
+    """Add each non-mainland region's misfit model to the mainland surface there.
 
     The mainland surface is extrapolated into the other regions by the gap
     filling; each region with at least `min_pixels` usable pixels then gets
     the median of ``residual - surface`` over them as a constant, so an
     island's whole-cycle error (or any constant offset) is absorbed by the
-    island alone.
+    island alone. With ``model="plane"`` a region with at least
+    `plane_min_pixels` usable pixels gets a robust plane instead, which also
+    absorbs the tilt the extrapolation leaves across a large island.
     """
     from ..unwrap.regions import largest_region
 
@@ -214,7 +239,20 @@ def _region_offsets(
         use = region & usable & np.isfinite(residual_ds)
         if use.sum() < min_pixels:
             continue
-        offset = float(np.median(residual_ds[use] - surface_ds[use]))
+        misfit = residual_ds[use] - surface_ds[use]
+        if model == "plane" and use.sum() >= plane_min_pixels:
+            r_use, c_use = np.nonzero(use)
+            coef = _robust_plane(r_use, c_use, misfit)
+            r_all, c_all = np.nonzero(region)
+            out[r_all, c_all] += coef[0] + coef[1] * r_all + coef[2] * c_all
+            logger.debug(
+                "region %d: %d px, plane %.4f %+.2e/row %+.2e/col",
+                lab,
+                int(use.sum()),
+                *coef,
+            )
+            continue
+        offset = float(np.median(misfit))
         out[region] += offset
         logger.debug("region %d: %d px, offset %.4f", lab, int(use.sum()), offset)
     return out
@@ -273,9 +311,11 @@ def calibrate_pair(
     exclude_mask : np.ndarray, optional
         Remove-restore mask (True = excluded from the fit).
     fit_mask : np.ndarray, optional
-        Stable-pixel mask (True = may be fit), required when
-        ``surface.fit_mask`` names one; `venti.frames.fit_mask_path` locates
-        the file. Pixels outside it are left out of the loclin fit only.
+        Stable-pixel mask (True = may be fit). Required when
+        ``surface.fit_mask`` names a packaged one (`venti.frames.fit_mask_path`
+        locates the file); may also be given without a name, for a mask the
+        caller reads from its own input (e.g. a runconfig file). Pixels
+        outside it are left out of the loclin fit only.
     sigma_tropo : np.ndarray or float, optional
         Uncertainty of the tropospheric correction, same units as `disp`
         (R-E1 term; 0 until a model exists).
@@ -314,10 +354,10 @@ def calibrate_pair(
         fit_mask=fit_mask,
         sigma_tropo=sigma_tropo if np.ndim(sigma_tropo) > 0 else None,
     )
-    if (options.surface.fit_mask is None) != (fit_mask is None):
+    if options.surface.fit_mask is not None and fit_mask is None:
         msg = (
             f"surface.fit_mask is {options.surface.fit_mask!r} but fit_mask was"
-            f" {'not ' if fit_mask is None else ''}given"
+            " not given"
         )
         raise ValueError(msg)
     # one read-only zero layer shared by every component that is not applied
@@ -565,6 +605,8 @@ def calibrate_pair(
                 labels_ds,
                 valid_ds & ~area_ds,
                 options.surface.region_min_pixels,
+                model=options.surface.region_model,
+                plane_min_pixels=options.surface.region_plane_min_pixels,
             )
         fit_ok = (w_ds > 0) & valid_ds & ~exclude_ds
         fit_std = (
